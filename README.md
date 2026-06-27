@@ -1,2 +1,0 @@
-# QuantMessage_Application
-
