@@ -15,68 +15,70 @@ dependencies:
   # ═══════════════════════════════════════════════════════════════════════════
   #  Environment variables
   # ═══════════════════════════════════════════════════════════════════════════
-  flutter_dotenv: ^5.2.1           # ← NEW: Load .env file for Supabase keys
+  flutter_dotenv: ^5.2.1
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  Networking & API
   # ═══════════════════════════════════════════════════════════════════════════
   dio: ^5.4.3+1
   http: ^1.2.0
-  web_socket_channel: ^3.0.1         # Real-time AI streaming responses
+  web_socket_channel: ^3.0.1
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  Supabase & Auth
   # ═══════════════════════════════════════════════════════════════════════════
-  supabase_flutter: ^2.10.0          # ← CHANGED: Updated for new key format (sb_publishable_)
+  supabase_flutter: ^2.10.0
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  State Management & Persistence
   # ═══════════════════════════════════════════════════════════════════════════
   flutter_riverpod: ^2.5.1
-  shared_preferences: ^2.2.3         # User memory & preferences
-  flutter_secure_storage: ^9.2.4     # Secure JWT/auth tokens
+  shared_preferences: ^2.2.3
+  flutter_secure_storage: ^9.2.4
   hive: ^2.2.3
   hive_flutter: ^1.1.0
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  UI / Aesthetics / Animations
   # ═══════════════════════════════════════════════════════════════════════════
-  google_fonts: ^6.2.1               # Orbitron, Inter, JetBrains Mono, Outfit, Tinos
-  flutter_markdown: ^0.7.4           # Rendering AI responses (latest stable)
-  fl_chart: ^1.0.0                   # Analytics / charting views
+  google_fonts: ^6.2.1
+  flutter_markdown: ^0.7.4
+  fl_chart: ^1.0.0
   shimmer: ^3.0.0
-  animate_do: ^3.3.4                 # Waterfall / Zoom splash effects
+  animate_do: ^3.3.4
   lottie: ^3.1.2
-  cached_network_image: ^3.4.1       # ← NEW: image caching for thumbnails/PDFs
+  cached_network_image: ^3.4.1
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  File / Image / PDF Handling
+  #  File / Image / PDF Handling — WEB COMPATIBLE ✅
   # ═══════════════════════════════════════════════════════════════════════════
-  image_picker: ^1.1.2               # Gallery + camera capture (bumped from 1.0.7)
-  file_picker: ^8.1.4                # ← NEW: PDF & document picker
-  syncfusion_flutter_pdfviewer: ^27.1.48  # ← NEW: in-chat PDF viewer
-  mime: ^1.0.6                       # ← NEW: MIME type detection from filename
+  image_picker: ^1.1.2
+  image_picker_for_web: ^3.0.0       # ← NEW: Web support for image_picker
+  file_picker: ^8.1.4                # Already web-compatible
+  syncfusion_flutter_pdfviewer: ^27.1.48  # Web compatible
+  mime: ^1.0.6
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  Vision, Hardware & Permissions
   # ═══════════════════════════════════════════════════════════════════════════
-  mobile_scanner: ^4.0.1             # QR code scanning
-  permission_handler: ^11.3.1        # Camera / Gallery / Mic access
-  record: ^5.1.2                     # ← NEW: voice input recording
-  just_audio: ^0.9.40                # ← NEW: TTS playback
+  mobile_scanner: ^4.0.1
+  permission_handler: ^11.3.1
+  record: ^5.1.2
+  just_audio: ^0.9.40
   speech_to_text: ^7.3.0
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  Utilities
   # ═══════════════════════════════════════════════════════════════════════════
-  intl: ^0.19.0                      # Date / currency formatting
-  uuid: ^4.4.0                       # Unique session IDs
-  jwt_decoder: ^2.0.1                # Decoding auth tokens
-  path_provider: ^2.1.3              # Local cache management
-  path: ^1.9.0                       # ← NEW: file path manipulation
+  intl: ^0.19.0
+  uuid: ^4.4.0
+  jwt_decoder: ^2.0.1
+  path_provider: ^2.1.3
+  path: ^1.9.0
+  file_selector: ^1.0.3             # ← NEW: Backup web file picker
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  Firebase & Auth (Optional — kept for future Google/FB login)
+  #  Firebase & Auth (Optional)
   # ═══════════════════════════════════════════════════════════════════════════
   firebase_core: ^3.13.0
   firebase_auth: ^5.5.2
@@ -95,11 +97,7 @@ flutter:
   uses-material-design: true
   generate: true
 
-  # ═══════════════════════════════════════════════════════════════════════════
-  #  Assets bundled with the app
-  # ═══════════════════════════════════════════════════════════════════════════
   assets:
-    - .env                            # ← NEW: required for Supabase keys
-  # Uncomment when you add Lottie animations or custom images:
+    - .env
   # - assets/animations/
   # - assets/images/

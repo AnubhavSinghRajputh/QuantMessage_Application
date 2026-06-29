@@ -1,23 +1,33 @@
 // lib/services/upload_service.dart
+//
+// QuantMessage — File upload + multimodal chat messages
+//
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' show File;
 
-// ← FIX: explicitly hide MultipartFile (and FormData) from http
-import 'package:http/http.dart' as http show Client, Response, Request;
-
-// ← FIX: hide MultipartFile from Supabase's re-export of http
-import 'package:supabase_flutter/supabase_flutter.dart' hide MultipartFile;
-
-// ← dio's MultipartFile will be the only one in scope now
-import 'package:dio/dio.dart';
+import 'package:dio/dio.dart';   // ← Get MultipartFile from dio
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;   // ← Full import
+import 'package:supabase_flutter/supabase_flutter.dart' hide MultipartFile;  // ← Hide from supabase
 
 import '../core/chat_message.dart';
 
 /// Handles file uploads + multimodal chat messages against the FastAPI backend.
 class UploadService {
-  static const String _baseUrl = 'https://your-app.up.railway.app/api/v1';
+  // ── Configuration ────────────────────────────────────────────────────────
+
+  static const String _defaultBaseUrl =
+      'https://your-app.up.railway.app/api/v1';
+
+  String get _baseUrl {
+    const fromEnv = String.fromEnvironment('BACKEND_URL');
+    if (fromEnv.isNotEmpty) return fromEnv;
+    return _defaultBaseUrl;
+  }
+
+  // ── Dependencies ──────────────────────────────────────────────────────────
 
   final SupabaseClient _supabase;
   final Dio _dio;
@@ -34,7 +44,9 @@ class UploadService {
               receiveTimeout: const Duration(seconds: 60),
               sendTimeout: const Duration(seconds: 60),
             )),
-        _fallbackClient = fallbackClient ?? http.Client();
+        _fallbackClient = fallbackClient ?? http.Client() {
+    _dio.interceptors.add(_SupabaseAuthInterceptor(_supabase));
+  }
 
   // ── Auth helpers ──────────────────────────────────────────────────────────
 
@@ -46,14 +58,14 @@ class UploadService {
     return session.accessToken;
   }
 
-  Map<String, String> _jsonHeaders() {
-    return {
-      'Authorization': 'Bearer ${_accessToken()}',
-      'Content-Type': 'application/json',
-    };
-  }
+  Map<String, String> _jsonHeaders() => {
+    'Authorization': 'Bearer ${_accessToken()}',
+    'Content-Type': 'application/json',
+  };
 
-  // ── UPLOAD (with real progress) ───────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  UPLOAD (with real progress via dio)
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<Attachment> uploadFile({
     required File file,
@@ -67,7 +79,7 @@ class UploadService {
 
     onProgress?.call(0.0);
 
-    // ✓ This now unambiguously refers to dio's MultipartFile
+    // ← dio.MultipartFile (in scope from `import 'package:dio/dio.dart';`)
     final FormData formData = FormData.fromMap({
       'conversation_id': conversationId,
       'file': await MultipartFile.fromFile(
@@ -129,7 +141,9 @@ class UploadService {
     }
   }
 
-  // ── CHAT MESSAGE (with attachments) ───────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  CHAT MESSAGE (with attachments)
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>> sendMessageWithAttachments({
     required String message,
@@ -164,7 +178,9 @@ class UploadService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  // ── Streaming chat ────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Streaming chat (SSE)
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Stream<Map<String, dynamic>> streamMessageWithAttachments({
     required String message,
@@ -173,31 +189,36 @@ class UploadService {
     bool isIncognito = false,
     String? agentOverride,
   }) async* {
-    final response = await _fallbackClient.post(
+    final request = http.Request(
+      'POST',
       Uri.parse('$_baseUrl/chat/stream'),
-      headers: _jsonHeaders(),
-      body: jsonEncode({
-        'message': message,
-        'conversation_id': conversationId,
-        'is_incognito': isIncognito,
-        if (agentOverride != null) 'agent_override': agentOverride,
-        'attachments': attachments
-            .where((a) => a.id != null)
-            .map((a) => {
-          'id': a.id,
-          'type': a.type.name,
-          'filename': a.filename,
-        })
-            .toList(),
-      }),
     );
+    request.headers.addAll(_jsonHeaders());
+    request.body = jsonEncode({
+      'message': message,
+      'conversation_id': conversationId,
+      'is_incognito': isIncognito,
+      if (agentOverride != null) 'agent_override': agentOverride,
+      'attachments': attachments
+          .where((a) => a.id != null)
+          .map((a) => {
+        'id': a.id,
+        'type': a.type.name,
+        'filename': a.filename,
+      })
+          .toList(),
+    });
 
+    final http.StreamedResponse response =
+    await _fallbackClient.send(request);
     if (response.statusCode >= 400) {
+      final errorBody = await response.stream.bytesToString();
       throw Exception(
-          'Stream API error (${response.statusCode}): ${response.body}');
+          'Stream API error (${response.statusCode}): $errorBody');
     }
 
-    final lines = const LineSplitter().convert(response.body);
+    final body = await response.stream.bytesToString();
+    final lines = const LineSplitter().convert(body);
     for (final line in lines) {
       if (line.startsWith('data: ')) {
         try {
@@ -210,13 +231,17 @@ class UploadService {
     }
   }
 
-  // ── Voice transcription ────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Voice transcription
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<String> transcribeAudio(File audioFile) async {
     final filename = audioFile.path.split('/').last;
     final formData = FormData.fromMap({
-      'file': await MultipartFile.fromFile(audioFile.path,
-          filename: filename),
+      'file': await MultipartFile.fromFile(
+        audioFile.path,
+        filename: filename,
+      ),
     });
 
     final response = await _dio.post(
@@ -236,7 +261,9 @@ class UploadService {
     return body['text'] as String? ?? '';
   }
 
-  // ── Conversational helpers ────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Conversation history
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<List<Map<String, dynamic>>> getHistory({int limit = 50}) async {
     final response = await _fallbackClient.get(
@@ -271,7 +298,9 @@ class UploadService {
     }
   }
 
-  // ── Settings ───────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Settings
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>> getSettings() async {
     final response = await _fallbackClient.get(
@@ -297,7 +326,9 @@ class UploadService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  // ── Agent registry ────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Agent registry
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>> listAgents() async {
     final response = await _fallbackClient.get(
@@ -310,7 +341,9 @@ class UploadService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  // ── Health ─────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Health check
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Future<bool> healthCheck() async {
     try {
@@ -322,7 +355,9 @@ class UploadService {
     }
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Helpers
+  // ═══════════════════════════════════════════════════════════════════════════
 
   Attachment _parseAttachment({
     required Map<String, dynamic> body,
@@ -377,5 +412,30 @@ class UploadService {
   void dispose() {
     _fallbackClient.close();
     _dio.close();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Auth Interceptor — auto-attaches Supabase JWT to every Dio request
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _SupabaseAuthInterceptor extends Interceptor {
+  final SupabaseClient _supabase;
+  _SupabaseAuthInterceptor(this._supabase);
+
+  @override
+  void onRequest(
+      RequestOptions options,
+      RequestInterceptorHandler handler,
+      ) {
+    try {
+      final session = _supabase.auth.currentSession;
+      if (session != null) {
+        options.headers['Authorization'] = 'Bearer ${session.accessToken}';
+      }
+    } catch (e) {
+      debugPrint('[UploadService] Auth interceptor: $e');
+    }
+    handler.next(options);
   }
 }

@@ -1,19 +1,21 @@
 // lib/screens/incognito_screen.dart
 //
 // QuantMessage — Ghost Mode (ephemeral, no DB persistence)
-// Now Supabase-aware
+// Cross-platform + Supabase-aware
 //
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' show File;             // ← Only import File
 import 'dart:math' as math;
+import 'dart:typed_data';                // ← NEW: for Uint8List
 import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';   // ← ADDED
+import 'package:path_provider/path_provider.dart';   // ← NEW
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/app_theme.dart';
 import '../core/chat_message.dart';
@@ -32,7 +34,7 @@ class IncognitoScreen extends StatefulWidget {
 
 class _IncognitoScreenState extends State<IncognitoScreen>
     with TickerProviderStateMixin {
-  // ← NEW: Get current Supabase user
+  // ── Supabase user ────────────────────────────────────────────────────────
   User? get _currentUser => Supabase.instance.client.auth.currentUser;
   String? get _userEmail => _currentUser?.email;
 
@@ -104,27 +106,141 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     super.dispose();
   }
 
-  // ← NEW: Exit incognito (just navigate back, keep user signed in)
+  // ── Exit incognito ───────────────────────────────────────────────────────
   void _exitIncognito() {
     Navigator.of(context).pop();
   }
 
-  Future<void> _onAttachmentButtonPressed() async {
-    await AttachmentPickerSheet.show(
-      context,
-      onSelected: _addAttachment,
+  // ── Attachment handlers (cross-platform) ──────────────────────────────────
+
+  /// Called by [AttachmentPickerSheet]. Works on web + mobile.
+  void _addAttachment(Uint8List bytes, String filename, String mimeType) {
+    final attachment = Attachment(
+      filename: filename,
+      type: _typeFromMime(mimeType),
+      mimeType: mimeType,
+      sizeBytes: bytes.length,
+      status: UploadStatus.pending,
     );
+
+    setState(() => _pendingAttachments.add(attachment));
+
+    // Save to temp file on mobile so upload_service can stream it
+    _writeTempFile(bytes, filename).then((file) {
+      if (!mounted || file == null) return;
+      setState(() {
+        final idx = _pendingAttachments.indexWhere((a) =>
+        a.filename == filename && a.sizeBytes == bytes.length);
+        if (idx != -1) {
+          _pendingAttachments[idx].localFile = file;
+        }
+      });
+    });
   }
 
-  void _addAttachment(File file, String mimeType) {
-    final attachment = AttachmentX.fromFile(file, mimeOverride: mimeType);
-    setState(() => _pendingAttachments.add(attachment));
+  AttachmentType _typeFromMime(String mime) {
+    if (mime.startsWith('image/')) return AttachmentType.image;
+    if (mime == 'application/pdf') return AttachmentType.pdf;
+    if (mime.startsWith('text/')) return AttachmentType.text;
+    return AttachmentType.unknown;
+  }
+
+  Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final tempFile = File('${dir.path}/$filename');
+      await tempFile.writeAsBytes(bytes, flush: true);
+      return tempFile;
+    } catch (e) {
+      return null; // Web — no temp file
+    }
+  }
+
+  Future<void> _onAttachmentButtonPressed() async {
+    await AttachmentPickerSheet.show(context, onSelected: _addAttachment);
   }
 
   void _removePendingAttachment(int index) {
     setState(() => _pendingAttachments.removeAt(index));
   }
 
+  Future<Attachment?> _uploadPendingAttachment(Attachment att) async {
+    _generateEphemeralId();
+
+    setState(() {
+      final idx = _pendingAttachments.indexOf(att);
+      if (idx != -1) {
+        _pendingAttachments[idx] =
+            att.copyWith(status: UploadStatus.uploading, progress: 0.1);
+      }
+    });
+
+    // Wait briefly for temp file (mobile only)
+    if (att.localFile == null) {
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        final refreshed = _pendingAttachments.firstWhere(
+              (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+          orElse: () => att,
+        );
+        if (refreshed.localFile != null) break;
+      }
+    }
+
+    try {
+      final ready = _pendingAttachments.firstWhere(
+            (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+        orElse: () => att,
+      );
+
+      if (ready.localFile == null) {
+        throw Exception('File not ready');
+      }
+
+      final result = await _uploader.uploadFile(
+        file: ready.localFile!,
+        conversationId: _ephemeralSessionId!,
+        onProgress: (p) {
+          if (!mounted) return;
+          setState(() {
+            final i = _pendingAttachments.indexWhere(
+                  (a) =>
+              a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+            );
+            if (i != -1) {
+              _pendingAttachments[i] =
+                  _pendingAttachments[i].copyWith(progress: p);
+            }
+          });
+        },
+      );
+
+      if (!mounted) return result;
+      setState(() {
+        final i = _pendingAttachments.indexWhere(
+              (a) =>
+          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+        );
+        if (i != -1) _pendingAttachments[i] = result;
+      });
+      return result;
+    } catch (e) {
+      if (!mounted) return null;
+      setState(() {
+        final i = _pendingAttachments.indexWhere(
+              (a) =>
+          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+        );
+        if (i != -1) {
+          _pendingAttachments[i] =
+              att.copyWith(status: UploadStatus.failed);
+        }
+      });
+      return null;
+    }
+  }
+
+  // ── Send handler ─────────────────────────────────────────────────────────
   Future<void> _handleSend() async {
     final text = _controller.text.trim();
     final hasAttachments = _pendingAttachments.isNotEmpty;
@@ -151,28 +267,14 @@ class _IncognitoScreenState extends State<IncognitoScreen>
         if (att.isReady) {
           uploaded.add(att);
         } else if (att.localFile != null) {
-          final result = await _uploader.uploadFile(
-            file: att.localFile!,
-            conversationId: _ephemeralSessionId!,
-            onProgress: (p) {
-              if (!mounted) return;
-              setState(() {
-                final i = _pendingAttachments.indexOf(att);
-                if (i != -1) {
-                  _pendingAttachments[i] =
-                      _pendingAttachments[i].copyWith(progress: p);
-                }
-              });
-            },
-          );
-          uploaded.add(result);
+          final result = await _uploadPendingAttachment(att);
+          if (result != null) uploaded.add(result);
         }
       }
 
       final response = await _uploader.sendMessageWithAttachments(
-        message: text.isEmpty
-            ? 'Please analyze the attached file(s).'
-            : text,
+        message:
+        text.isEmpty ? 'Please analyze the attached file(s).' : text,
         attachments: uploaded,
         conversationId: _ephemeralSessionId,
         isIncognito: true,
@@ -221,6 +323,10 @@ class _IncognitoScreenState extends State<IncognitoScreen>
     _api.resetSession();
     _emptyCtrl.forward(from: 0.0);
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Build
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -307,7 +413,6 @@ class _IncognitoScreenState extends State<IncognitoScreen>
             ),
             centerTitle: true,
             actions: [
-              // ← NEW: Exit incognito button (back to chat)
               IconButton(
                 icon: const Icon(Icons.exit_to_app_rounded,
                     color: Colors.white38),
@@ -385,7 +490,6 @@ class _IncognitoScreenState extends State<IncognitoScreen>
             delayBeforeStart: const Duration(milliseconds: 900),
           ),
         ),
-        // ← NEW: Show logged-in user
         if (_userEmail != null) ...[
           const SizedBox(height: 12),
           FadeInAnimation(
@@ -602,7 +706,8 @@ class _IncognitoScreenState extends State<IncognitoScreen>
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: AppTheme.accentGrey),
+                              strokeWidth: 2,
+                              color: AppTheme.accentGrey),
                         ),
                       )
                     else
@@ -643,7 +748,7 @@ class _IncognitoScreenState extends State<IncognitoScreen>
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Support widgets (unchanged from your file)
+//  Support widgets (unchanged)
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _SuggestionPill extends StatefulWidget {

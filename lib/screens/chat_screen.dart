@@ -1,16 +1,20 @@
 // lib/screens/chat_screen.dart
 //
-// QuantMessage Chat Screen — Supabase-authenticated
+// QuantMessage Chat Screen
+// • Supabase auth-aware (sign-out, personalized greeting)
+// • Cross-platform attachments (web + mobile) via Uint8List
 //
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:io' show File;
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/app_theme.dart';
@@ -187,19 +191,21 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen>
     with TickerProviderStateMixin {
-  // ← NEW: Current Supabase user
+  // ── Supabase user ────────────────────────────────────────────────────────
   User? get _currentUser => Supabase.instance.client.auth.currentUser;
   String? get _userEmail => _currentUser?.email;
   String? get _userName =>
       _currentUser?.userMetadata?['full_name'] as String? ??
           _currentUser?.email?.split('@').first;
 
+  // ── Controllers & services ───────────────────────────────────────────────
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final QuantSpaceApi _api = QuantSpaceApi();
   final UploadService _uploader = UploadService();
   final FocusNode _inputFocus = FocusNode();
 
+  // ── State ────────────────────────────────────────────────────────────────
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
 
@@ -209,6 +215,7 @@ class _ChatScreenState extends State<ChatScreen>
   String _selectedModelName = 'Gemini 1.5 Flash';
   String _selectedModelId = 'gemini/gemini-1.5-flash';
 
+  // ── Animations ───────────────────────────────────────────────────────────
   late final AnimationController _inputFocusCtrl;
   late final Animation<double> _inputGlow;
   late final AnimationController _sendBtnCtrl;
@@ -235,7 +242,9 @@ class _ChatScreenState extends State<ChatScreen>
     _inputGlow =
         CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
     _inputFocus.addListener(() {
-      _inputFocus.hasFocus ? _inputFocusCtrl.forward() : _inputFocusCtrl.reverse();
+      _inputFocus.hasFocus
+          ? _inputFocusCtrl.forward()
+          : _inputFocusCtrl.reverse();
     });
 
     _sendBtnCtrl = AnimationController(
@@ -248,7 +257,8 @@ class _ChatScreenState extends State<ChatScreen>
 
     _emptyCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 650));
-    _emptyOpacity = CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
+    _emptyOpacity =
+        CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
     _emptyScale = Tween<double>(begin: 0.96, end: 1.0).animate(
         CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOutBack));
     _emptyCtrl.forward();
@@ -265,12 +275,11 @@ class _ChatScreenState extends State<ChatScreen>
     super.dispose();
   }
 
-  // ── NEW: Sign-out handler ────────────────────────────────────────────────
+  // ── Sign-out handler ──────────────────────────────────────────────────────
   Future<void> _handleSignOut() async {
     try {
       await Supabase.instance.client.auth.signOut();
       if (!mounted) return;
-      // Navigate back to sign-in screen
       Navigator.of(context).pushNamedAndRemoveUntil(
         '/signin',
             (route) => false,
@@ -286,14 +295,57 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  // ── Attachment handlers ──────────────────────────────────────────────────
-  Future<void> _onAttachmentButtonPressed() async {
-    await AttachmentPickerSheet.show(context, onSelected: _addAttachment);
+  // ── Attachment handlers (cross-platform) ──────────────────────────────────
+
+  /// Called by [AttachmentPickerSheet]. Receives raw bytes — works on both
+  /// web (no File) and mobile (we save to temp file for upload_service).
+  void _addAttachment(Uint8List bytes, String filename, String mimeType) {
+    final attachment = Attachment(
+      filename: filename,
+      type: _typeFromMime(mimeType),
+      mimeType: mimeType,
+      sizeBytes: bytes.length,
+      status: UploadStatus.pending,
+    );
+
+    setState(() => _pendingAttachments.add(attachment));
+
+    // On mobile, also save bytes to a temp file so upload_service can
+    // stream it. On web, this is a no-op (path_provider throws, we catch).
+    _writeTempFile(bytes, filename).then((file) {
+      if (!mounted || file == null) return;
+      setState(() {
+        final idx = _pendingAttachments.indexWhere((a) =>
+        a.filename == filename && a.sizeBytes == bytes.length);
+        if (idx != -1) {
+          _pendingAttachments[idx] =
+              _pendingAttachments[idx].copyWith(localFile: file);
+        }
+      });
+    });
   }
 
-  void _addAttachment(File file, String mimeType) {
-    final attachment = AttachmentX.fromFile(file, mimeOverride: mimeType);
-    setState(() => _pendingAttachments.add(attachment));
+  AttachmentType _typeFromMime(String mime) {
+    if (mime.startsWith('image/')) return AttachmentType.image;
+    if (mime == 'application/pdf') return AttachmentType.pdf;
+    if (mime.startsWith('text/')) return AttachmentType.text;
+    return AttachmentType.unknown;
+  }
+
+  /// Writes bytes to a temp file. Returns null on web (no-op).
+  Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final tempFile = File('${dir.path}/$filename');
+      await tempFile.writeAsBytes(bytes, flush: true);
+      return tempFile;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> _onAttachmentButtonPressed() async {
+    await AttachmentPickerSheet.show(context, onSelected: _addAttachment);
   }
 
   void _removePendingAttachment(int index) {
@@ -311,14 +363,39 @@ class _ChatScreenState extends State<ChatScreen>
       }
     });
 
+    // Wait briefly for the temp file to be written (mobile only)
+    if (att.localFile == null) {
+      for (int i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        final refreshed = _pendingAttachments.firstWhere(
+              (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+          orElse: () => att,
+        );
+        if (refreshed.localFile != null) break;
+      }
+    }
+
     try {
+      final ready = _pendingAttachments.firstWhere(
+            (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+        orElse: () => att,
+      );
+
+      if (ready.localFile == null) {
+        throw Exception(
+            'File not ready. Web uploads need backend support — see docs.');
+      }
+
       final uploaded = await _uploader.uploadFile(
-        file: att.localFile!,
+        file: ready.localFile!,
         conversationId: _activeConversationId!,
         onProgress: (p) {
           if (!mounted) return;
           setState(() {
-            final i = _pendingAttachments.indexOf(att);
+            final i = _pendingAttachments.indexWhere(
+                  (a) =>
+              a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+            );
             if (i != -1) {
               _pendingAttachments[i] =
                   _pendingAttachments[i].copyWith(progress: p);
@@ -329,14 +406,20 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (!mounted) return uploaded;
       setState(() {
-        final i = _pendingAttachments.indexOf(att);
+        final i = _pendingAttachments.indexWhere(
+              (a) =>
+          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+        );
         if (i != -1) _pendingAttachments[i] = uploaded;
       });
       return uploaded;
     } catch (e) {
       if (!mounted) return att;
       setState(() {
-        final i = _pendingAttachments.indexOf(att);
+        final i = _pendingAttachments.indexWhere(
+              (a) =>
+          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
+        );
         if (i != -1) {
           _pendingAttachments[i] =
               att.copyWith(status: UploadStatus.failed);
@@ -384,7 +467,8 @@ class _ChatScreenState extends State<ChatScreen>
       }
 
       final response = await _uploader.sendMessageWithAttachments(
-        message: text.isEmpty ? 'Please analyze the attached file(s).' : text,
+        message:
+        text.isEmpty ? 'Please analyze the attached file(s).' : text,
         attachments: uploaded,
         conversationId: _activeConversationId,
       );
@@ -422,6 +506,10 @@ class _ChatScreenState extends State<ChatScreen>
       }
     });
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Build
+  // ═══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -491,7 +579,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildGreeting() {
-    final userName = _userName ?? 'there';  // ← CHANGED
+    final userName = _userName ?? 'there';
     return Column(
       children: [
         Row(
@@ -509,7 +597,7 @@ class _ChatScreenState extends State<ChatScreen>
             const SizedBox(width: 16),
             Flexible(
               child: Text(
-                "< Welcome $userName >",  // ← CHANGED
+                "< Welcome $userName >",
                 style: GoogleFonts.outfit(
                   color: const Color(0xFFE8E8E8),
                   fontSize: 56,
@@ -585,7 +673,6 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  // ── Input box with attachments ───────────────────────────────────────────
   Widget _buildInputBox() {
     return AnimatedBuilder(
       animation: _inputGlow,
@@ -686,7 +773,6 @@ class _ChatScreenState extends State<ChatScreen>
                           scale: _sendBtnScale,
                           child: _AnimatedHoverSendButton()),
                     ),
-                    // ← NEW: Sign-out icon
                     const SizedBox(width: 8),
                     _AnimatedHoverIcon(
                       icon: Icons.logout_rounded,
@@ -757,7 +843,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
           children: [
             CircleAvatar(
               radius: 16,
-              backgroundColor: msg.isUser ? Colors.white10 : Colors.blueAccent,
+              backgroundColor:
+              msg.isUser ? Colors.white10 : Colors.blueAccent,
               child: Text(
                 msg.isUser ? "👤" : "🤖",
                 style: const TextStyle(fontSize: 12),
@@ -774,14 +861,13 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
                         fontSize: 10, color: Colors.white38),
                   ),
                   const SizedBox(height: 5),
-
                   if (hasAttachments)
                     AttachmentList(attachments: msg.attachments),
-
                   if (hasText)
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.8),
+                          maxWidth:
+                          MediaQuery.of(context).size.width * 0.8),
                       child: msg.isUser
                           ? MarkdownBody(
                           data: msg.text,
@@ -816,7 +902,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Other UI components (unchanged)
+//  Other UI components
 // ═══════════════════════════════════════════════════════════════════════════
 
 class _SuggestionPill extends StatefulWidget {
@@ -933,7 +1019,8 @@ class _AnimatedHoverDropdownButtonState
                     fontWeight: FontWeight.w500)),
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down,
-                color: _isHovered ? Colors.white : Colors.white54, size: 16),
+                color: _isHovered ? Colors.white : Colors.white54,
+                size: 16),
           ],
         ),
       ),

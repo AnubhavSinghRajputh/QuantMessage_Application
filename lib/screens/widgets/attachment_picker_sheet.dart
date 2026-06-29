@@ -1,23 +1,19 @@
 // lib/screens/widgets/attachment_picker_sheet.dart
+// WEB + MOBILE COMPATIBLE — VERIFIED
 
-import 'dart:io';
-import 'dart:ui';
-
+import 'dart:io' show File;                  // ← Tree-shaken on web
+import 'dart:typed_data';
+import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
-typedef AttachmentSelected = void Function(File file, String mimeType);
-
-/// ═══════════════════════════════════════════════════════════════════════════
-///  Modal bottom sheet for picking an attachment.
-///
-///  Now:
-///  • Uses backdrop blur so the chat screen blurs behind it
-///  • Stateful for safe async handling (camera, file picker)
-///  • Built-in entry animation that matches chat_screen.dart
-///  • Properly synced with chat_screen's design language
-/// ═══════════════════════════════════════════════════════════════════════════
+typedef AttachmentSelected = void Function(
+    Uint8List bytes,
+    String filename,
+    String mimeType,
+    );
 
 class AttachmentPickerSheet extends StatefulWidget {
   final AttachmentSelected onSelected;
@@ -29,12 +25,9 @@ class AttachmentPickerSheet extends StatefulWidget {
       }) {
     return showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent, // ← we draw our own background
-      barrierColor: Colors.black.withOpacity(0.55), // ← semi-transparent
-      barrierLabel: 'Dismiss',
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.55),
       isScrollControlled: true,
-      elevation: 0,
-      // ← Enable backdrop blur on supported platforms
       useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -52,8 +45,7 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
   late final AnimationController _entryCtrl;
   late final Animation<double> _slideAnim;
   late final Animation<double> _fadeAnim;
-
-  bool _busy = false; // shows loading state during async pick
+  bool _busy = false;
 
   @override
   void initState() {
@@ -62,10 +54,8 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
       vsync: this,
       duration: const Duration(milliseconds: 350),
     );
-    _slideAnim = CurvedAnimation(
-      parent: _entryCtrl,
-      curve: Curves.easeOutCubic,
-    );
+    _slideAnim =
+        CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOutCubic);
     _fadeAnim = CurvedAnimation(parent: _entryCtrl, curve: Curves.easeOut);
     _entryCtrl.forward();
   }
@@ -76,27 +66,25 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     super.dispose();
   }
 
-  // ── Pickers ───────────────────────────────────────────────────────────────
+  // ── Pickers (cross-platform) ─────────────────────────────────────────────
 
   Future<void> _pickFromGallery() async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
       final picker = ImagePicker();
-      final image = await picker.pickImage(
+      final XFile? image = await picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: 2400,
         imageQuality: 85,
       );
       if (image != null && mounted) {
-        widget.onSelected(
-          File(image.path),
-          'image/${image.path.split('.').last}',
-        );
-        Navigator.of(context).pop();
+        final bytes = await image.readAsBytes();
+        widget.onSelected(bytes, image.name, _guessMime(image.name));
+        if (mounted) Navigator.of(context).pop();
       }
     } catch (e) {
-      _showError('Gallery error: $e');
+      _showError('Could not pick image: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -104,17 +92,22 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
 
   Future<void> _takePhoto() async {
     if (_busy) return;
+    if (kIsWeb) {
+      _showError('📷 Camera is only available on mobile devices.');
+      return;
+    }
     setState(() => _busy = true);
     try {
       final picker = ImagePicker();
-      final image = await picker.pickImage(
+      final XFile? image = await picker.pickImage(
         source: ImageSource.camera,
         maxWidth: 2400,
         imageQuality: 85,
       );
       if (image != null && mounted) {
-        widget.onSelected(File(image.path), 'image/jpeg');
-        Navigator.of(context).pop();
+        final bytes = await image.readAsBytes();
+        widget.onSelected(bytes, image.name, 'image/jpeg');
+        if (mounted) Navigator.of(context).pop();
       }
     } catch (e) {
       _showError('Camera error: $e');
@@ -129,15 +122,26 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'txt', 'doc', 'docx'],
-        withData: false,
+        allowedExtensions: [
+          'pdf', 'txt', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'webp'
+        ],
+        withData: true,
       );
-      if (result != null &&
-          result.files.single.path != null &&
-          mounted) {
-        final file = File(result.files.single.path!);
-        widget.onSelected(file, _mimeFromExt(file.path));
-        Navigator.of(context).pop();
+
+      if (result == null || result.files.isEmpty) return;
+
+      final picked = result.files.single;
+      Uint8List? bytes = picked.bytes;
+
+      // Mobile fallback: read from disk
+      if (bytes == null && picked.path != null) {
+        final file = File(picked.path!);
+        bytes = await file.readAsBytes();
+      }
+
+      if (bytes != null && mounted) {
+        widget.onSelected(bytes, picked.name, _guessMime(picked.name));
+        if (mounted) Navigator.of(context).pop();
       }
     } catch (e) {
       _showError('File picker error: $e');
@@ -146,34 +150,35 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     }
   }
 
+  String _guessMime(String filename) {
+    final ext = filename.split('.').last.toLowerCase();
+    return {
+      'png': 'image/png',
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'webp': 'image/webp',
+      'gif': 'image/gif',
+      'pdf': 'application/pdf',
+      'txt': 'text/plain',
+      'doc': 'application/msword',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    }[ext] ??
+        'application/octet-stream';
+  }
+
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.red.shade700,
+        backgroundColor: const Color(0xFF2A2A2A),
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  String _mimeFromExt(String path) {
-    final ext = path.split('.').last.toLowerCase();
-    return {
-      'pdf': 'application/pdf',
-      'txt': 'text/plain',
-      'doc': 'application/msword',
-      'docx':
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    }[ext] ??
-        'application/octet-stream';
-  }
-
-  // ── Build ─────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
-    // Slide-up entry animation
     return SlideTransition(
       position: Tween<Offset>(
         begin: const Offset(0, 1),
@@ -184,9 +189,8 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
         child: SafeArea(
           top: false,
           child: Container(
-            // Backdrop blur for premium feel — works on iOS, macOS, Android 12+
             decoration: BoxDecoration(
-              color: const Color(0xFF1E1E1E).withOpacity(0.96),
+              color: const Color(0xFF1E1E1E).withOpacity(0.98),
               borderRadius:
               const BorderRadius.vertical(top: Radius.circular(24)),
               border: Border(
@@ -203,109 +207,110 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
                 ),
               ],
             ),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Padding(
-                padding:
-                const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // ── Drag handle ───────────────────────────────────
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.25),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+            child: Padding(
+              padding:
+              const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-
-                    // ── Title ─────────────────────────────────────────
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.add_circle_outline,
-                          color: Color(0xFFE27457),
-                          size: 22,
+                  ),
+                  const Row(
+                    children: [
+                      Icon(Icons.add_circle_outline,
+                          color: Color(0xFFE27457), size: 22),
+                      SizedBox(width: 10),
+                      Text(
+                        'Add to chat',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
                         ),
-                        const SizedBox(width: 10),
-                        const Text(
-                          'Add to chat',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    kIsWeb
+                        ? 'Pick from your computer — images, PDFs, docs'
+                        : 'Upload an image or document for the AI to analyze',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  _OptionTile(
+                    icon: Icons.image_outlined,
+                    title: kIsWeb
+                        ? 'Image from Computer'
+                        : 'Photo from Gallery',
+                    subtitle: 'JPG, PNG, WebP, GIF',
+                    onTap: _pickFromGallery,
+                    enabled: !_busy,
+                  ),
+                  _OptionTile(
+                    icon: Icons.camera_alt_outlined,
+                    title: 'Take a Photo',
+                    subtitle: kIsWeb ? '📷 Mobile only' : 'Use your camera',
+                    onTap: _takePhoto,
+                    enabled: !_busy && !kIsWeb,
+                  ),
+                  _OptionTile(
+                    icon: Icons.picture_as_pdf_outlined,
+                    title: 'Document (PDF / File)',
+                    subtitle: 'PDF, TXT, DOC, DOCX',
+                    onTap: _pickFile,
+                    enabled: !_busy,
+                  ),
+                  if (_busy)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white70),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Upload an image or document for the AI to analyze',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
-                        fontSize: 13,
+                          SizedBox(width: 12),
+                          Text('Opening file picker...',
+                              style: TextStyle(color: Colors.white70)),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 20),
-
-                    // ── Options ───────────────────────────────────────
-                    _OptionTile(
-                      icon: Icons.image_outlined,
-                      title: 'Photo from Gallery',
-                      subtitle: 'JPG, PNG, WebP, GIF',
-                      onTap: _pickFromGallery,
-                      enabled: !_busy,
-                    ),
-                    _OptionTile(
-                      icon: Icons.camera_alt_outlined,
-                      title: 'Take a Photo',
-                      subtitle: 'Use your camera to capture something',
-                      onTap: _takePhoto,
-                      enabled: !_busy,
-                    ),
-                    _OptionTile(
-                      icon: Icons.picture_as_pdf_outlined,
-                      title: 'Document (PDF)',
-                      subtitle: 'Upload a PDF for analysis',
-                      onTap: _pickFile,
-                      enabled: !_busy,
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // ── Busy indicator ─────────────────────────────────
-                    if (_busy)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white70,
-                              ),
+                  if (kIsWeb)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 14, color: Colors.white24),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Tip: Ctrl+V (⌘+V) to paste images from clipboard',
+                              style: TextStyle(
+                                  color: Colors.white24, fontSize: 11),
                             ),
-                            SizedBox(width: 12),
-                            Text(
-                              'Opening...',
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-
-                    const SizedBox(height: 4),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -315,17 +320,12 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Reusable option tile — clean InkWell + hover-ready
-// ═══════════════════════════════════════════════════════════════════════════
-
 class _OptionTile extends StatefulWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
   final bool enabled;
-
   const _OptionTile({
     required this.icon,
     required this.title,
@@ -344,14 +344,19 @@ class _OptionTileState extends State<_OptionTile> {
 
   @override
   Widget build(BuildContext context) {
-    final color = widget.enabled
-        ? Colors.white
-        : Colors.white.withOpacity(0.3);
+    final color =
+    widget.enabled ? Colors.white : Colors.white.withOpacity(0.3);
 
     return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      cursor: widget.enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      onEnter: (_) {
+        if (widget.enabled) setState(() => _hovered = true);
+      },
+      onExit: (_) {
+        if (widget.enabled) setState(() => _hovered = false);
+      },
+      cursor: widget.enabled
+          ? SystemMouseCursors.click
+          : SystemMouseCursors.basic,
       child: GestureDetector(
         onTapDown: widget.enabled
             ? (_) => setState(() => _pressed = true)
@@ -366,7 +371,8 @@ class _OptionTileState extends State<_OptionTile> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           margin: const EdgeInsets.symmetric(vertical: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             color: _pressed
                 ? Colors.white.withOpacity(0.10)
@@ -382,7 +388,6 @@ class _OptionTileState extends State<_OptionTile> {
           ),
           child: Row(
             children: [
-              // Icon container
               Container(
                 width: 44,
                 height: 44,
@@ -393,37 +398,26 @@ class _OptionTileState extends State<_OptionTile> {
                 child: Icon(widget.icon, color: color, size: 22),
               ),
               const SizedBox(width: 14),
-              // Title + subtitle
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      widget.title,
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    Text(widget.title,
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
-                    Text(
-                      widget.subtitle,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
-                        fontSize: 12,
-                      ),
-                    ),
+                    Text(widget.subtitle,
+                        style: TextStyle(
+                            color: Colors.white.withOpacity(0.5),
+                            fontSize: 12)),
                   ],
                 ),
               ),
-              // Chevron
-              Icon(
-                Icons.chevron_right,
-                color: Colors.white.withOpacity(0.3),
-                size: 18,
-              ),
+              Icon(Icons.chevron_right,
+                  color: Colors.white.withOpacity(0.3), size: 18),
             ],
           ),
         ),

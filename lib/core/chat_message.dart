@@ -1,6 +1,7 @@
 // lib/core/chat_message.dart
-
-// lib/core/chat_message.dart
+//
+// QuantMessage — Chat data models
+//
 
 import 'dart:io';
 
@@ -16,22 +17,21 @@ enum UploadStatus {
   failed,
 }
 
-/// Represents a single file attached to a chat message.
-/// Holds both local (pre-upload) and remote (post-upload) state.
+/// Represents a file attached to a chat message.
 class Attachment {
   final String? id;
   final String filename;
   final AttachmentType type;
   final String mimeType;
   final int sizeBytes;
-  final File? localFile;
-  final String? remoteUrl;
-  final String? thumbnailUrl;
-  final String? extractedText;
-  final UploadStatus status;
-  final double progress;
+  File? localFile;
+  String? remoteUrl;
+  String? thumbnailUrl;
+  String? extractedText;
+  UploadStatus status;
+  double progress;
 
-  const Attachment({
+  Attachment({
     this.id,
     required this.filename,
     required this.type,
@@ -55,10 +55,27 @@ class Attachment {
 
   bool get isImage => type == AttachmentType.image;
   bool get isPdf => type == AttachmentType.pdf;
-  bool get isReady => status == UploadStatus.completed;
+  bool get isReady =>
+      status == UploadStatus.completed && remoteUrl != null;
 
+  /// Clamped progress update.
+  Attachment withProgress(double newProgress) {
+    final clamped = newProgress.clamp(0.0, 1.0);
+    return copyWith(progress: clamped);
+  }
+
+  /// Mark this attachment as failed (for retry UI).
+  Attachment markFailed() => copyWith(status: UploadStatus.failed);
+
+  /// Returns a copy with selected fields replaced.
+  /// Now PUBLIC (no underscore) and includes `localFile`.
   Attachment copyWith({
     String? id,
+    String? filename,
+    AttachmentType? type,
+    String? mimeType,
+    int? sizeBytes,
+    File? localFile,
     String? remoteUrl,
     String? thumbnailUrl,
     String? extractedText,
@@ -67,11 +84,11 @@ class Attachment {
   }) {
     return Attachment(
       id: id ?? this.id,
-      filename: filename,
-      type: type,
-      mimeType: mimeType,
-      sizeBytes: sizeBytes,
-      localFile: localFile,
+      filename: filename ?? this.filename,
+      type: type ?? this.type,
+      mimeType: mimeType ?? this.mimeType,
+      sizeBytes: sizeBytes ?? this.sizeBytes,
+      localFile: localFile ?? this.localFile,
       remoteUrl: remoteUrl ?? this.remoteUrl,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       extractedText: extractedText ?? this.extractedText,
@@ -82,7 +99,6 @@ class Attachment {
 }
 
 /// The single source of truth for a chat bubble.
-/// Now optionally carries a list of [Attachment]s alongside the text.
 class ChatMessage {
   final String text;
   final bool isUser;
