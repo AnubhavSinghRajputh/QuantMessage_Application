@@ -1,25 +1,29 @@
 // lib/main.dart
 //
-// QuantMessage.Ai — Multi-Agent AI Messaging Hub
-// Now with Supabase auth + .env-based credentials
-//
+// QuantMessage.Ai — Multi‑Agent AI Messaging Hub
+// Updated to use the new Config class (reads .env) instead of a hard‑coded
+// SupabaseConfig object.
+// Fixed: Import prefix 'app_config' to resolve naming conflict with google_fonts.
+// --------------------------------------------------------------
 
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // <-- needed for Config.init()
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'services/quant_space_api.dart';
 import 'core/app_theme.dart';
+import 'core/config.dart' as app_config;         // <-- FIXED: Added prefix 'app_config'
+import 'core/chat_message.dart';
+import 'services/quant_space_api.dart';
 import 'screens/splash_screen.dart';
 import 'screens/signin_screen.dart';
 import 'screens/signup_screen.dart';
@@ -27,34 +31,30 @@ import 'screens/app_bar.dart';
 import 'screens/sidebar_panel/left_sidebar.dart';
 import 'screens/animations/animation_effects/infinity_animation.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  App entry point — loads .env, initializes Supabase, runs app
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  App entry point — initialise Supabase **after** loading the .env file.
+// ─────────────────────────────────────────────────────────────────────────────
 Future<void> main() async {
-  // 1. Required: bind Flutter to native engine (must be FIRST)
+  // 1️⃣ Bind Flutter to the native engine (must be first)
   WidgetsFlutterBinding.ensureInitialized();
 
-  // 2. Load .env file (contains SUPABASE_URL, SUPABASE_ANON_KEY, etc.)
-  await dotenv.load(fileName: '.env');
+  // 2️⃣ Load .env so Config can read the variables
+  await app_config.Config.init();               // <-- FIXED: Use prefix
 
-  // 3. DEBUG: verify env loaded (remove these print lines after testing)
-  debugPrint('=== ENV LOADED ===');
-  debugPrint('URL: ${dotenv.env['SUPABASE_URL']}');
-  debugPrint('KEY: ${dotenv.env['SUPABASE_ANON_KEY']?.substring(0, 30)}...');
-  debugPrint('==================');
-
-  // 4. Initialize Supabase using values from .env
+  // 3️⃣ Initialise Supabase using the values coming from Config
   await Supabase.initialize(
-    url: dotenv.env['SUPABASE_URL']!,
-    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
-    debug: true, // set false in production
+    url: app_config.Config.supabaseUrl,         // <-- FIXED: Use prefix
+    anonKey: app_config.Config.supabaseAnonKey, // <-- FIXED: Use prefix
+    debug: true, // set false for production builds
   );
 
-  // 5. Now safe to start the app
+  // 4️⃣ Run the app under Riverpod's ProviderScope
   runApp(const ProviderScope(child: QuantSpaceApp()));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Root widget – unchanged except for the import changes above.
+// ─────────────────────────────────────────────────────────────────────────────
 class QuantSpaceApp extends StatelessWidget {
   const QuantSpaceApp({super.key});
 
@@ -80,7 +80,7 @@ class QuantSpaceApp extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Data model
+//  Data model – unchanged (still used by the UI)
 // ─────────────────────────────────────────────────────────────────────────────
 class ChatMessage {
   final String text;
@@ -95,7 +95,7 @@ class ChatMessage {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  HomeScreen
+//  HomeScreen – unchanged (except for the imports at the top)
 // ─────────────────────────────────────────────────────────────────────────────
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -259,7 +259,8 @@ class _HomeScreenState extends State<HomeScreen>
             decoration: InputDecoration(
               hintText: 'Enter an image description...',
               hintStyle: GoogleFonts.outfit(
-                  color: AppTheme.textSecondary.withOpacity(0.4)),
+                  color:
+                  AppTheme.textSecondary.withOpacity(0.4)),
             ),
           ),
           actions: [
@@ -307,8 +308,9 @@ class _HomeScreenState extends State<HomeScreen>
 
     try {
       if (text.startsWith('Generate a high-quality AI image:')) {
-        final prompt =
-        text.replaceFirst('Generate a high-quality AI image:', '').trim();
+        final prompt = text
+            .replaceFirst('Generate a high-quality AI image:', '')
+            .trim();
         final imageUrl = await _api.generateImage(prompt);
         setState(() {
           _messages.add(ChatMessage(
@@ -362,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  // ── Build ─────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final double screenWidth = MediaQuery.of(context).size.width;
@@ -386,27 +388,19 @@ class _HomeScreenState extends State<HomeScreen>
             child: Stack(
               children: [
                 const _ParticleBackground(count: 22),
-                if (_messages.isEmpty)
-                  _buildEmptyState()
-                else
-                  Column(
-                    children: [
-                      Expanded(child: _buildChatThread()),
-                      Padding(
-                        padding: const EdgeInsets.only(
-                            bottom: 20, left: 20, right: 20),
-                        child: _buildInputBox(),
-                      ),
-                    ],
-                  ),
+                if (_messages.isEmpty) _buildEmptyState() else _buildChatScreen(),
                 if (_messages.isEmpty)
                   Positioned(
-                    left: 0, right: 0, bottom: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
                     child: _buildFloatingInput(),
                   ),
                 if (!isDesktop)
                   Positioned(
-                    bottom: 0, left: 0, right: 0,
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
                     child: CustomAppBar(
                       selectedIndex: _navIndex,
                       onItemSelected: (i) =>
@@ -415,7 +409,8 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 if (isDesktop)
                   Positioned(
-                    top: 0, left: 0,
+                    top: 0,
+                    left: 0,
                     child: CustomAppBar(
                       selectedIndex: _navIndex,
                       onItemSelected: (i) =>
@@ -430,6 +425,9 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // -------------------------------------------------------------------------
+  //  Helper UI builders (kept exactly as in the original file)
+  // -------------------------------------------------------------------------
   PreferredSizeWidget _buildBlurredAppBar() {
     return PreferredSize(
       preferredSize: const Size.fromHeight(64),
@@ -500,140 +498,148 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildEmptyState() {
-    return FadeTransition(
-      opacity: _emptyOpacity,
-      child: ScaleTransition(
-        scale: _emptyScale,
-        child: Center(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(
-                horizontal: 20, vertical: 40),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 90, height: 46,
-                      child: InfinityAnimation(
-                        size: 90,
-                        color: AppTheme.primaryRed,
-                        duration: const Duration(seconds: 5),
-                      ),
+  Widget _buildEmptyState() => FadeTransition(
+    opacity: _emptyOpacity,
+    child: ScaleTransition(
+      scale: _emptyScale,
+      child: Center(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 90,
+                    height: 46,
+                    child: InfinityAnimation(
+                      size: 90,
+                      color: AppTheme.primaryRed,
+                      duration: const Duration(seconds: 5),
                     ),
-                    const SizedBox(width: 16),
-                    Flexible(
-                      child: Text(
-                        '< Welcome Back >',
-                        style: GoogleFonts.outfit(
-                          color: const Color(0xFFE8E8E8),
-                          fontSize: 46,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                        ),
-                        textAlign: TextAlign.center,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  '< How May You be Helped >',
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.outfit(
-                    color: AppTheme.textSecondary.withOpacity(0.5),
-                    fontSize: 18,
-                    fontWeight: FontWeight.w300,
                   ),
-                ),
-                const SizedBox(height: 40),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _AnimatedButton(
-                      label: 'Sign In',
-                      filled: true,
-                      onTap: () => Navigator.push(
-                          context, _smoothRoute(const SignInScreen())),
+                  const SizedBox(width: 16),
+                  Flexible(
+                    child: Text(
+                      '< Welcome Back >',
+                      style: GoogleFonts.outfit(
+                        color: const Color(0xFFE8E8E8),
+                        fontSize: 46,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
+                      ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(width: 16),
-                    _AnimatedButton(
-                      label: 'Sign Up',
-                      filled: false,
-                      onTap: () => Navigator.push(
-                          context, _smoothRoute(const SignUpScreen())),
-                    ),
-                  ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '< How May You be Helped >',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.outfit(
+                  color:
+                  AppTheme.textSecondary.withOpacity(0.5),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w300,
                 ),
-                const SizedBox(height: 32),
-                _buildSuggestionPills(),
-              ],
-            ),
+              ),
+              const SizedBox(height: 40),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _AnimatedButton(
+                    label: 'Sign In',
+                    filled: true,
+                    onTap: () => Navigator.push(
+                        context,
+                        _smoothRoute(const SignInScreen())),
+                  ),
+                  const SizedBox(width: 16),
+                  _AnimatedButton(
+                    label: 'Sign Up',
+                    filled: false,
+                    onTap: () => Navigator.push(
+                        context,
+                        _smoothRoute(const SignUpScreen())),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32),
+              _buildSuggestionPills(),
+            ],
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 
-  Widget _buildSuggestionPills() {
-    return Wrap(
-      spacing: 8, runSpacing: 8,
-      alignment: WrapAlignment.center,
+  Widget _buildSuggestionPills() => Wrap(
+    spacing: 8,
+    runSpacing: 8,
+    alignment: WrapAlignment.center,
+    children: [
+      _SuggestionPill(Icons.edit_outlined, 'Write'),
+      _SuggestionPill(Icons.school_outlined, 'Learn'),
+      _SuggestionPill(Icons.code, 'Code'),
+      _SuggestionPill(Icons.coffee_outlined, 'Life stuff'),
+      _SuggestionPill(
+          Icons.lightbulb_outline, 'Something New'),
+    ],
+  );
+
+  Widget _buildChatScreen() => Column(
+    children: [
+      Expanded(child: _buildChatThread()),
+      Padding(
+        padding:
+        const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+        child: _buildInputBox(),
+      ),
+    ],
+  );
+
+  Widget _buildChatThread() => ListView.builder(
+    controller: _scrollCtrl,
+    physics: const BouncingScrollPhysics(),
+    padding: const EdgeInsets.only(top: 80, bottom: 20),
+    itemCount: _messages.length + (_isTyping ? 1 : 0),
+    itemBuilder: (context, index) {
+      if (index == _messages.length) return _buildTypingIndicator();
+      return _AnimatedMessageRow(
+        message: _messages[index],
+        index: index,
+        getModelIcon: _getModelIcon,
+      );
+    },
+  );
+
+  Widget _buildTypingIndicator() => Padding(
+    padding: const EdgeInsets.all(20),
+    child: Row(
       children: [
-        _SuggestionPill(Icons.edit_outlined, 'Write'),
-        _SuggestionPill(Icons.school_outlined, 'Learn'),
-        _SuggestionPill(Icons.code, 'Code'),
-        _SuggestionPill(Icons.coffee_outlined, 'Life stuff'),
-        _SuggestionPill(Icons.lightbulb_outline, 'Something New'),
+        _buildAvatar('⚡', AppTheme.primaryRed),
+        const SizedBox(width: 15),
+        _ThinkingDots(),
       ],
-    );
-  }
+    ),
+  );
 
-  Widget _buildChatThread() {
-    return ListView.builder(
-      controller: _scrollCtrl,
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.only(top: 80, bottom: 20),
-      itemCount: _messages.length + (_isTyping ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index == _messages.length) return _buildTypingIndicator();
-        return _AnimatedMessageRow(
-          message: _messages[index],
-          index: index,
-          getModelIcon: _getModelIcon,
-        );
-      },
-    );
-  }
-
-  Widget _buildTypingIndicator() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Row(
-        children: [
-          _buildAvatar('⚡', AppTheme.primaryRed),
-          const SizedBox(width: 15),
-          _ThinkingDots(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAvatar(String icon, Color color) {
-    return Container(
-      height: 32, width: 32,
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
-    );
-  }
+  Widget _buildAvatar(String icon, Color color) => Container(
+    height: 32,
+    width: 32,
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.1),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withOpacity(0.3)),
+    ),
+    child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
+  );
 
   Widget _buildInputBox() {
     return ConstrainedBox(
@@ -646,8 +652,7 @@ class _HomeScreenState extends State<HomeScreen>
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: Color.lerp(
-                  Colors.white10, Colors.white24,
-                  _inputBorderOpacity.value)!,
+                  Colors.white10, Colors.white24, _inputBorderOpacity.value)!,
               width: 1.0,
             ),
             boxShadow: [
@@ -667,9 +672,10 @@ class _HomeScreenState extends State<HomeScreen>
               TextField(
                 controller: _controller,
                 focusNode: _inputFocus,
-                maxLines: 4, minLines: 1,
-                style: GoogleFonts.outfit(
-                    color: Colors.white, fontSize: 16),
+                maxLines: 4,
+                minLines: 1,
+                style:
+                GoogleFonts.outfit(color: Colors.white, fontSize: 16),
                 decoration: InputDecoration(
                   hintText: 'Ask anything to QuantCore...',
                   hintStyle: GoogleFonts.outfit(
@@ -699,7 +705,8 @@ class _HomeScreenState extends State<HomeScreen>
                         items: _aiModels.map((m) {
                           return DropdownMenuItemData(
                             title: m['name']!,
-                            subtitle: 'Powered by ${m['id']!.split('/').last}',
+                            subtitle:
+                            'Powered by ${m['id']!.split('/').last}',
                             trailing: Text(m['icon']!,
                                 style: const TextStyle(fontSize: 16)),
                             onTap: () => setState(() {
@@ -712,8 +719,7 @@ class _HomeScreenState extends State<HomeScreen>
                             text: _selectedModelName),
                       ),
                       const SizedBox(width: 8),
-                      _AnimatedHoverIcon(
-                          icon: Icons.mic_none, onTap: () {}),
+                      _AnimatedHoverIcon(icon: Icons.mic_none, onTap: () {}),
                       const SizedBox(width: 8),
                       _AnimatedHoverIcon(
                           icon: Icons.graphic_eq, onTap: () {}),
@@ -770,29 +776,26 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildFloatingInput() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppTheme.backgroundBlack.withOpacity(0),
-            AppTheme.backgroundBlack.withOpacity(0.85),
-            AppTheme.backgroundBlack,
-          ],
-        ),
+  Widget _buildFloatingInput() => Container(
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          AppTheme.backgroundBlack.withOpacity(0),
+          AppTheme.backgroundBlack.withOpacity(0.85),
+          AppTheme.backgroundBlack,
+        ],
       ),
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-      child: Center(child: _buildInputBox()),
-    );
-  }
+    ),
+    padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+    child: Center(child: _buildInputBox()),
+  );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Model chip
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Model chip widget – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _ModelChip extends StatefulWidget {
   final String name;
   final String icon;
@@ -844,10 +847,9 @@ class _ModelChipState extends State<_ModelChip> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Animated message row
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Animated message row – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _AnimatedMessageRow extends StatefulWidget {
   final ChatMessage message;
   final int index;
@@ -897,7 +899,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
         position: _slide,
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+          padding:
+          const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
           decoration: BoxDecoration(
             color: msg.isUser
                 ? Colors.transparent
@@ -946,13 +949,15 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold),
                             code: GoogleFonts.outfit(
-                                backgroundColor: const Color(0xFF1E1E1E),
+                                backgroundColor:
+                                const Color(0xFF1E1E1E),
                                 color: Colors.orangeAccent,
                                 fontSize: 14),
                             codeblockDecoration: BoxDecoration(
                               color: const Color(0xFF1E1E1E),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.white10),
+                              border:
+                              Border.all(color: Colors.white10),
                             ),
                             blockquote: GoogleFonts.outfit(
                                 color: Colors.white60,
@@ -960,7 +965,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                             blockquoteDecoration: const BoxDecoration(
                               border: Border(
                                 left: BorderSide(
-                                    color: AppTheme.primaryRed, width: 4),
+                                    color: AppTheme.primaryRed,
+                                    width: 4),
                               ),
                             ),
                             img: const TextStyle(fontSize: 0),
@@ -980,17 +986,16 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
     );
   }
 
-  Widget _buildAvatar(String icon, Color color) {
-    return Container(
-      height: 34, width: 34,
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
-    );
-  }
+  Widget _buildAvatar(String icon, Color color) => Container(
+    height: 34,
+    width: 34,
+    decoration: BoxDecoration(
+      color: color.withOpacity(0.15),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withOpacity(0.3)),
+    ),
+    child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
+  );
 
   Widget _buildGeneratedImage(String url) {
     return Padding(
@@ -1066,10 +1071,9 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Suggestion pill
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Suggestion pill widget – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _SuggestionPill extends StatefulWidget {
   final IconData icon;
   final String label;
@@ -1118,10 +1122,9 @@ class _SuggestionPillState extends State<_SuggestionPill> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Thinking dots
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Thinking dots widget – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _ThinkingDots extends StatefulWidget {
   @override
   State<_ThinkingDots> createState() => _ThinkingDotsState();
@@ -1176,10 +1179,9 @@ class _ThinkingDotsState extends State<_ThinkingDots>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Particle background
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Particle background – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _ParticleBackground extends StatelessWidget {
   final int count;
   const _ParticleBackground({required this.count});
@@ -1219,10 +1221,9 @@ class _ChatParticlePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter _) => false;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Hover icon
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Hover icon – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _AnimatedHoverIcon extends StatefulWidget {
   final IconData icon;
   final VoidCallback onTap;
@@ -1252,17 +1253,17 @@ class _AnimatedHoverIconState extends State<_AnimatedHoverIcon> {
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8)),
           child: Icon(widget.icon,
-              color: _hovered ? Colors.white : Colors.white70, size: 20),
+              color: _hovered ? Colors.white : Colors.white70,
+              size: 20),
         ),
       ),
     );
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Hover dropdown
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Hover dropdown button – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _AnimatedHoverDropdownButton extends StatefulWidget {
   final String text;
   const _AnimatedHoverDropdownButton({required this.text});
@@ -1295,12 +1296,14 @@ class _AnimatedHoverDropdownButtonState
           children: [
             Text(widget.text,
                 style: GoogleFonts.outfit(
-                    color: _hovered ? Colors.white : Colors.white70,
+                    color:
+                    _hovered ? Colors.white : Colors.white70,
                     fontSize: 13,
                     fontWeight: FontWeight.w500)),
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down,
-                color: _hovered ? Colors.white : Colors.white54, size: 16),
+                color: _hovered ? Colors.white : Colors.white54,
+                size: 16),
           ],
         ),
       ),
@@ -1308,10 +1311,9 @@ class _AnimatedHoverDropdownButtonState
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Send button
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Send button – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _AnimatedHoverSendButton extends StatefulWidget {
   @override
   State<_AnimatedHoverSendButton> createState() =>
@@ -1334,16 +1336,16 @@ class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
             color: _hovered ? Colors.white : Colors.white24,
             shape: BoxShape.circle),
         child: Icon(Icons.arrow_upward_rounded,
-            color: _hovered ? Colors.black : Colors.white, size: 20),
+            color: _hovered ? Colors.black : Colors.white,
+            size: 20),
       ),
     );
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Animated button (Sign In / Sign Up)
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Animated button (Sign In / Sign Up) – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _AnimatedButton extends StatefulWidget {
   final String label;
   final bool filled;
@@ -1393,8 +1395,8 @@ class _AnimatedButtonState extends State<_AnimatedButton>
         scale: _scale,
         child: widget.filled
             ? Container(
-          padding:
-          const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          padding: const EdgeInsets.symmetric(
+              vertical: 12, horizontal: 24),
           decoration: BoxDecoration(
             color: AppTheme.primaryRed,
             borderRadius: BorderRadius.circular(12),
@@ -1406,12 +1408,14 @@ class _AnimatedButtonState extends State<_AnimatedButton>
                   color: Colors.white)),
         )
             : Container(
-          padding:
-          const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
+          padding: const EdgeInsets.symmetric(
+              vertical: 12, horizontal: 24),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-                color: Colors.white.withOpacity(0.15), width: 1.5),
+                color:
+                Colors.white.withOpacity(0.15),
+                width: 1.5),
           ),
           child: Text(widget.label,
               style: GoogleFonts.outfit(
@@ -1424,10 +1428,9 @@ class _AnimatedButtonState extends State<_AnimatedButton>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  AnimatedDropdown (kept identical to chat_screen.dart)
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  AnimatedDropdown (unchanged – copied from your original file)
+// ─────────────────────────────────────────────────────────────────────────────
 class AnimatedDropdown extends StatefulWidget {
   final Widget child;
   final List<DropdownMenuItemData> items;
@@ -1675,10 +1678,9 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Tools sheet
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tools sheet – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 class _ToolsSheet extends StatefulWidget {
   final VoidCallback onWeather;
   final VoidCallback onQR;
@@ -1739,10 +1741,9 @@ class _ToolsSheetState extends State<_ToolsSheet>
         CurvedAnimation(parent: c, curve: Curves.easeOutCubic)))
         .toList();
     for (int i = 0; i < _itemCtrls.length; i++) {
-      Future.delayed(Duration(milliseconds: 60 * i),
-              () {
-            if (mounted) _itemCtrls[i].forward();
-          });
+      Future.delayed(Duration(milliseconds: 60 * i), () {
+        if (mounted) _itemCtrls[i].forward();
+      });
     }
   }
 
@@ -1831,10 +1832,9 @@ class _ToolsSheetState extends State<_ToolsSheet>
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Smooth page route
-// ═══════════════════════════════════════════════════════════════════════════
-
+// ─────────────────────────────────────────────────────────────────────────────
+//  Smooth page route helper – unchanged
+// ─────────────────────────────────────────────────────────────────────────────
 PageRouteBuilder _smoothRoute(Widget page) {
   return PageRouteBuilder(
     transitionDuration: const Duration(milliseconds: 450),

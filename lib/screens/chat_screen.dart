@@ -1,8 +1,8 @@
 // lib/screens/chat_screen.dart
 //
 // QuantMessage Chat Screen
-// • Supabase auth-aware (sign-out, personalized greeting)
-// • Cross-platform attachments (web + mobile) via Uint8List
+// • Supabase auth‑aware (sign‑out, personalized greeting)
+// • Cross‑platform attachments (web + mobile) via Uint8List
 //
 
 import 'dart:async';
@@ -13,7 +13,9 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path/path.dart' as p; // ← path helper
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -28,10 +30,30 @@ import 'widgets/attachment_preview.dart';
 import 'widgets/attachment_thumbnail.dart';
 import 'widgets/attachment_picker_sheet.dart';
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Fade-in animation
-// ═══════════════════════════════════════════════════════════════════════════
+// ─────────────────────────────────────────────────────────────────────────────
+//  Supabase – initialise on first use (reads .env)
+// ─────────────────────────────────────────────────────────────────────────────
 
+// A tiny flag that survives across widget rebuilds – we only initialise once.
+bool _supabaseInitialized = false;
+
+/// Calls `Supabase.initialize` the first time it is needed.
+/// Subsequent calls become a no‑op, avoiding the removed `initialized` getter.
+Future<void> _ensureSupabaseInitialized() async {
+  if (_supabaseInitialized) return;
+  await Supabase.initialize(
+    url: dotenv.env['SUPABASE_URL'] ?? '',
+    anonKey: dotenv.env['SUPABASE_ANON_KEY'] ?? '',
+    // Optional: you can also pass the service role key if you ever need it —
+    // but it must NOT be shipped to client builds.
+    // serviceRoleKey: dotenv.env['SUPABASE_SERVICE_ROLE_KEY'],
+  );
+  _supabaseInitialized = true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Fade‑in animation
+// ═══════════════════════════════════════════════════════════════════════════
 class FadeInAnimation extends StatefulWidget {
   final Widget child;
   final Duration duration;
@@ -46,7 +68,7 @@ class FadeInAnimation extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _FadeInAnimationState createState() => _FadeInAnimationState();
+  State<FadeInAnimation> createState() => _FadeInAnimationState();
 }
 
 class _FadeInAnimationState extends State<FadeInAnimation>
@@ -60,8 +82,7 @@ class _FadeInAnimationState extends State<FadeInAnimation>
     _controller =
         AnimationController(vsync: this, duration: widget.duration);
     final curve = CurvedAnimation(parent: _controller, curve: widget.curve);
-    _opacityAnimation =
-        Tween<double>(begin: 0.0, end: 1.0).animate(curve);
+    _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(curve);
     if (widget.delay != null) {
       Future.delayed(widget.delay!, _controller.forward);
     } else {
@@ -76,15 +97,15 @@ class _FadeInAnimationState extends State<FadeInAnimation>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return FadeTransition(opacity: _opacityAnimation, child: widget.child);
-  }
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: _opacityAnimation,
+    child: widget.child,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Typing text animation
+//  Typing‑text animation
 // ═══════════════════════════════════════════════════════════════════════════
-
 class TypingText extends StatefulWidget {
   final String text;
   final TextStyle? style;
@@ -182,15 +203,13 @@ class _TypingTextState extends State<TypingText> {
 // ═══════════════════════════════════════════════════════════════════════════
 //  Chat screen
 // ═══════════════════════════════════════════════════════════════════════════
-
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen>
-    with TickerProviderStateMixin {
+class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   // ── Supabase user ────────────────────────────────────────────────────────
   User? get _currentUser => Supabase.instance.client.auth.currentUser;
   String? get _userEmail => _currentUser?.email;
@@ -227,26 +246,36 @@ class _ChatScreenState extends State<ChatScreen>
   final List<Map<String, String>> _aiModels = [
     {'name': 'Gemini 1.5 Flash', 'id': 'gemini/gemini-1.5-flash', 'icon': '✨'},
     {'name': 'GPT-4o', 'id': 'openai/gpt-4o', 'icon': '🧠'},
-    {'name': 'Claude 3.5 Sonnet', 'id': 'openrouter/anthropic/claude-3.5-sonnet', 'icon': '🎭'},
+    {
+      'name': 'Claude 3.5 Sonnet',
+      'id': 'openrouter/anthropic/claude-3.5-sonnet',
+      'icon': '🎭'
+    },
     {'name': 'QuantCore 1.0', 'id': 'groq/llama-3.1-70b-versatile', 'icon': '⚡'},
     {'name': 'Llama 3.1 8B', 'id': 'groq/llama-3.1-8b-instant', 'icon': '🚀'},
     {'name': 'Mixtral 8x7B', 'id': 'groq/mixtral-8x7b-32768', 'icon': '🔥'},
     {'name': 'DeepSeek Chat', 'id': 'openrouter/deepseek/deepseek-chat', 'icon': '🤖'},
   ];
 
+  // ── Initialise ───────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
+
+    // Initialise Supabase (reads .env). Runs only once per app launch.
+    _ensureSupabaseInitialized();
+
+    // Input‑focus animation
     _inputFocusCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 260));
-    _inputGlow =
-        CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
+    _inputGlow = CurvedAnimation(parent: _inputFocusCtrl, curve: Curves.easeOut);
     _inputFocus.addListener(() {
       _inputFocus.hasFocus
           ? _inputFocusCtrl.forward()
           : _inputFocusCtrl.reverse();
     });
 
+    // Send‑button press animation
     _sendBtnCtrl = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 110),
@@ -255,10 +284,9 @@ class _ChatScreenState extends State<ChatScreen>
     _sendBtnScale = Tween<double>(begin: 1.0, end: 0.86).animate(
         CurvedAnimation(parent: _sendBtnCtrl, curve: Curves.easeInOut));
 
-    _emptyCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 650));
-    _emptyOpacity =
-        CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
+    // Empty‑state intro animation
+    _emptyCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 650));
+    _emptyOpacity = CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOut);
     _emptyScale = Tween<double>(begin: 0.96, end: 1.0).animate(
         CurvedAnimation(parent: _emptyCtrl, curve: Curves.easeOutBack));
     _emptyCtrl.forward();
@@ -275,15 +303,12 @@ class _ChatScreenState extends State<ChatScreen>
     super.dispose();
   }
 
-  // ── Sign-out handler ──────────────────────────────────────────────────────
+  // ── Sign‑out handler ──────────────────────────────────────────────────────
   Future<void> _handleSignOut() async {
     try {
       await Supabase.instance.client.auth.signOut();
       if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(
-        '/signin',
-            (route) => false,
-      );
+      Navigator.of(context).pushNamedAndRemoveUntil('/signin', (route) => false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -295,10 +320,10 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  // ── Attachment handlers (cross-platform) ──────────────────────────────────
+  // ── Attachment handlers (cross‑platform) ──────────────────────────────────
 
   /// Called by [AttachmentPickerSheet]. Receives raw bytes — works on both
-  /// web (no File) and mobile (we save to temp file for upload_service).
+  /// web (no `File`) and mobile (we save to a temp file for the upload service).
   void _addAttachment(Uint8List bytes, String filename, String mimeType) {
     final attachment = Attachment(
       filename: filename,
@@ -310,16 +335,15 @@ class _ChatScreenState extends State<ChatScreen>
 
     setState(() => _pendingAttachments.add(attachment));
 
-    // On mobile, also save bytes to a temp file so upload_service can
-    // stream it. On web, this is a no-op (path_provider throws, we catch).
+    // Mobile: write the bytes to a temporary file so `UploadService`
+    // can stream it. Web: `getTemporaryDirectory` throws – we simply ignore.
     _writeTempFile(bytes, filename).then((file) {
       if (!mounted || file == null) return;
       setState(() {
         final idx = _pendingAttachments.indexWhere((a) =>
         a.filename == filename && a.sizeBytes == bytes.length);
         if (idx != -1) {
-          _pendingAttachments[idx] =
-              _pendingAttachments[idx].copyWith(localFile: file);
+          _pendingAttachments[idx] = _pendingAttachments[idx].copyWith(localFile: file);
         }
       });
     });
@@ -332,14 +356,15 @@ class _ChatScreenState extends State<ChatScreen>
     return AttachmentType.unknown;
   }
 
-  /// Writes bytes to a temp file. Returns null on web (no-op).
+  /// Writes bytes to a temporary file. Returns `null` on web (no filesystem).
   Future<File?> _writeTempFile(Uint8List bytes, String filename) async {
     try {
       final dir = await getTemporaryDirectory();
-      final tempFile = File('${dir.path}/$filename');
+      final tempFile = File(p.join(dir.path, filename));
       await tempFile.writeAsBytes(bytes, flush: true);
       return tempFile;
-    } catch (e) {
+    } catch (_) {
+      // On web `getTemporaryDirectory` throws – that's fine.
       return null;
     }
   }
@@ -355,6 +380,7 @@ class _ChatScreenState extends State<ChatScreen>
   Future<Attachment> _uploadPendingAttachment(Attachment att) async {
     _ensureConversationId();
 
+    // Mark as uploading
     setState(() {
       final idx = _pendingAttachments.indexOf(att);
       if (idx != -1) {
@@ -363,7 +389,7 @@ class _ChatScreenState extends State<ChatScreen>
       }
     });
 
-    // Wait briefly for the temp file to be written (mobile only)
+    // Mobile: wait a moment for the temp file to be written, if needed.
     if (att.localFile == null) {
       for (int i = 0; i < 20; i++) {
         await Future.delayed(const Duration(milliseconds: 100));
@@ -393,9 +419,7 @@ class _ChatScreenState extends State<ChatScreen>
           if (!mounted) return;
           setState(() {
             final i = _pendingAttachments.indexWhere(
-                  (a) =>
-              a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-            );
+                    (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes);
             if (i != -1) {
               _pendingAttachments[i] =
                   _pendingAttachments[i].copyWith(progress: p);
@@ -407,9 +431,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return uploaded;
       setState(() {
         final i = _pendingAttachments.indexWhere(
-              (a) =>
-          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-        );
+                (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes);
         if (i != -1) _pendingAttachments[i] = uploaded;
       });
       return uploaded;
@@ -417,12 +439,9 @@ class _ChatScreenState extends State<ChatScreen>
       if (!mounted) return att;
       setState(() {
         final i = _pendingAttachments.indexWhere(
-              (a) =>
-          a.filename == att.filename && a.sizeBytes == att.sizeBytes,
-        );
+                (a) => a.filename == att.filename && a.sizeBytes == att.sizeBytes);
         if (i != -1) {
-          _pendingAttachments[i] =
-              att.copyWith(status: UploadStatus.failed);
+          _pendingAttachments[i] = att.copyWith(status: UploadStatus.failed);
         }
       });
       rethrow;
@@ -430,7 +449,8 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _ensureConversationId() {
-    _activeConversationId ??= DateTime.now().millisecondsSinceEpoch.toString();
+    _activeConversationId ??=
+        DateTime.now().millisecondsSinceEpoch.toString();
   }
 
   // ── Send handler ─────────────────────────────────────────────────────────
@@ -457,6 +477,7 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       _ensureConversationId();
 
+      // Upload any pending attachments
       final uploaded = <Attachment>[];
       for (final att in pendingSnapshot) {
         if (att.isReady) {
@@ -466,11 +487,13 @@ class _ChatScreenState extends State<ChatScreen>
         }
       }
 
+      // Send the message (includes attachments if any)
       final response = await _uploader.sendMessageWithAttachments(
-        message:
-        text.isEmpty ? 'Please analyze the attached file(s).' : text,
+        message: text.isEmpty
+            ? 'Please analyze the attached file(s).'
+            : text,
         attachments: uploaded,
-        conversationId: _activeConversationId,
+        conversationId: _activeConversationId!,
       );
 
       if (!mounted) return;
@@ -510,13 +533,13 @@ class _ChatScreenState extends State<ChatScreen>
   // ═══════════════════════════════════════════════════════════════════════════
   //  Build
   // ═══════════════════════════════════════════════════════════════════════════
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.backgroundBlack,
       body: Row(
         children: [
+          // Left sidebar (new chat, etc.)
           LeftSidebar(
             onNewChat: () {
               setState(() {
@@ -527,6 +550,7 @@ class _ChatScreenState extends State<ChatScreen>
               });
             },
           ),
+          // Main chat area
           Expanded(
             child: Stack(
               children: [
@@ -578,6 +602,7 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // ── Greeting header (shows user name & sign‑in info) ───────────────────────
   Widget _buildGreeting() {
     final userName = _userName ?? 'there';
     return Column(
@@ -634,6 +659,7 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // ── Chat thread list ───────────────────────────────────────────────────────
   Widget _buildChatThread() {
     return ListView.builder(
       controller: _scrollController,
@@ -647,6 +673,7 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // ── Typing indicator (AI “thinking”) ─────────────────────────────────────
   Widget _buildTypingIndicator() {
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -673,6 +700,7 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // ── Input box (text field + attachment UI) ────────────────────────────────
   Widget _buildInputBox() {
     return AnimatedBuilder(
       animation: _inputGlow,
@@ -682,9 +710,9 @@ class _ChatScreenState extends State<ChatScreen>
           color: const Color(0xFF2F2F2F),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-              color: Color.lerp(
-                  Colors.white10, Colors.white24, _inputGlow.value)!,
-              width: 1.0),
+            color: Color.lerp(Colors.white10, Colors.white24, _inputGlow.value)!,
+            width: 1.0,
+          ),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.2),
@@ -700,12 +728,13 @@ class _ChatScreenState extends State<ChatScreen>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Show pending attachment thumbnails
             if (_pendingAttachments.isNotEmpty)
               AttachmentPreviewStrip(
                 attachments: _pendingAttachments,
                 onRemove: _removePendingAttachment,
               ),
-
+            // Text field
             TextField(
               controller: _controller,
               focusNode: _inputFocus,
@@ -725,6 +754,7 @@ class _ChatScreenState extends State<ChatScreen>
               onSubmitted: (_) => _handleSend(),
             ),
             const SizedBox(height: 8),
+            // Action icons (attachment, model selector, send, etc.)
             Align(
               alignment: Alignment.centerRight,
               child: SingleChildScrollView(
@@ -762,6 +792,7 @@ class _ChatScreenState extends State<ChatScreen>
                     const SizedBox(width: 8),
                     _AnimatedHoverIcon(icon: Icons.graphic_eq, onTap: () {}),
                     const SizedBox(width: 12),
+                    // Send button (press‑down animation)
                     GestureDetector(
                       onTapDown: (_) => _sendBtnCtrl.forward(),
                       onTapUp: (_) async {
@@ -770,8 +801,9 @@ class _ChatScreenState extends State<ChatScreen>
                       },
                       onTapCancel: () => _sendBtnCtrl.reverse(),
                       child: ScaleTransition(
-                          scale: _sendBtnScale,
-                          child: _AnimatedHoverSendButton()),
+                        scale: _sendBtnScale,
+                        child: _AnimatedHoverSendButton(),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     _AnimatedHoverIcon(
@@ -788,17 +820,18 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // ── Suggestion pills shown on the empty state ───────────────────────────────
   Widget _buildSuggestionPills() {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       alignment: WrapAlignment.center,
-      children: [
+      children: const [
         _SuggestionPill(Icons.edit_outlined, "Write"),
         _SuggestionPill(Icons.school_outlined, "Learn"),
         _SuggestionPill(Icons.code, "Code"),
         _SuggestionPill(Icons.coffee_outlined, "Life stuff"),
-        _SuggestionPill(Icons.lightbulb_outline, " Something New"),
+        _SuggestionPill(Icons.lightbulb_outline, "Something New"),
       ],
     );
   }
@@ -807,7 +840,6 @@ class _ChatScreenState extends State<ChatScreen>
 // ═══════════════════════════════════════════════════════════════════════════
 //  Animated Message Row (renders attachments)
 // ═══════════════════════════════════════════════════════════════════════════
-
 class _AnimatedMessageRow extends StatefulWidget {
   final ChatMessage message;
   const _AnimatedMessageRow({required this.message});
@@ -834,9 +866,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
           color: msg.isUser
               ? Colors.transparent
               : AppTheme.surfaceDark.withOpacity(0.3),
-          border: Border(
-            bottom: BorderSide(color: Colors.white.withOpacity(0.03)),
-          ),
+          border: const Border(bottom: BorderSide(color: Colors.white12)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -870,10 +900,11 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
                           MediaQuery.of(context).size.width * 0.8),
                       child: msg.isUser
                           ? MarkdownBody(
-                          data: msg.text,
-                          styleSheet: MarkdownStyleSheet(
-                              p: GoogleFonts.outfit(
-                                  color: Colors.white, fontSize: 15)))
+                        data: msg.text,
+                        styleSheet: MarkdownStyleSheet(
+                            p: GoogleFonts.outfit(
+                                color: Colors.white, fontSize: 15)),
+                      )
                           : _buildAIContent(),
                     ),
                 ],
@@ -888,9 +919,10 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
   Widget _buildAIContent() {
     return _isTypingComplete
         ? MarkdownBody(
-        data: widget.message.text,
-        styleSheet: MarkdownStyleSheet(
-            p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)))
+      data: widget.message.text,
+      styleSheet: MarkdownStyleSheet(
+          p: GoogleFonts.outfit(color: Colors.white, fontSize: 15)),
+    )
         : TypingText(
       text: widget.message.text,
       style: GoogleFonts.outfit(color: Colors.white, fontSize: 15),
@@ -903,51 +935,36 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow> {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Other UI components
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _SuggestionPill extends StatefulWidget {
+// ═════════════════════════════════════════════════════════════════════════==
+class _SuggestionPill extends StatelessWidget {
   final IconData icon;
   final String label;
   const _SuggestionPill(this.icon, this.label);
   @override
-  State<_SuggestionPill> createState() => _SuggestionPillState();
-}
-
-class _SuggestionPillState extends State<_SuggestionPill> {
-  bool _isHovered = false;
-  @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: _isHovered
-              ? Colors.white.withOpacity(0.1)
-              : const Color(0xFF2F2F2F),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-              color: _isHovered ? Colors.white54 : Colors.white10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(widget.icon,
-                color: _isHovered ? Colors.white : Colors.white70, size: 16),
-            const SizedBox(width: 6),
-            Text(widget.label,
-                style: GoogleFonts.outfit(
-                    color: _isHovered ? Colors.white : Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
-          ],
-        ),
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10),
       ),
-    );
-  }
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white70, size: 16),
+          const SizedBox(width: 6),
+          Text(label,
+              style: GoogleFonts.outfit(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500)),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AnimatedHoverIcon extends StatefulWidget {
@@ -961,27 +978,28 @@ class _AnimatedHoverIcon extends StatefulWidget {
 class _AnimatedHoverIconState extends State<_AnimatedHoverIcon> {
   bool _isHovered = false;
   @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-              color: _isHovered
-                  ? Colors.white.withOpacity(0.05)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(8)),
-          child: Icon(widget.icon,
-              color: _isHovered ? Colors.white : Colors.white70, size: 20),
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _isHovered = true),
+    onExit: (_) => setState(() => _isHovered = false),
+    child: GestureDetector(
+      onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: _isHovered
+              ? Colors.white.withOpacity(0.05)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
         ),
+        child: Icon(widget.icon,
+            color:
+            _isHovered ? Colors.white : Colors.white70,
+            size: 20),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _AnimatedHoverDropdownButton extends StatefulWidget {
@@ -996,36 +1014,37 @@ class _AnimatedHoverDropdownButtonState
     extends State<_AnimatedHoverDropdownButton> {
   bool _isHovered = false;
   @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-            color: _isHovered
-                ? Colors.white.withOpacity(0.1)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8)),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(widget.text,
-                style: GoogleFonts.outfit(
-                    color: _isHovered ? Colors.white : Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500)),
-            const SizedBox(width: 4),
-            Icon(Icons.keyboard_arrow_down,
-                color: _isHovered ? Colors.white : Colors.white54,
-                size: 16),
-          ],
-        ),
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _isHovered = true),
+    onExit: (_) => setState(() => _isHovered = false),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding:
+      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: _isHovered
+            ? Colors.white.withOpacity(0.1)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
       ),
-    );
-  }
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(widget.text,
+              style: GoogleFonts.outfit(
+                  color: _isHovered ? Colors.white : Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500)),
+          const SizedBox(width: 4),
+          Icon(Icons.keyboard_arrow_down,
+              color:
+              _isHovered ? Colors.white : Colors.white54,
+              size: 16),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AnimatedHoverSendButton extends StatefulWidget {
@@ -1037,46 +1056,44 @@ class _AnimatedHoverSendButton extends StatefulWidget {
 class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
   bool _isHovered = false;
   @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-            color: _isHovered ? Colors.white : Colors.white24,
-            shape: BoxShape.circle),
-        child: Icon(Icons.arrow_upward_rounded,
-            color: _isHovered ? Colors.black : Colors.white, size: 20),
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _isHovered = true),
+    onExit: (_) => setState(() => _isHovered = false),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: _isHovered ? Colors.white : Colors.white24,
+        shape: BoxShape.circle,
       ),
-    );
-  }
+      child: Icon(Icons.arrow_upward_rounded,
+          color: _isHovered ? Colors.black : Colors.white,
+          size: 20),
+    ),
+  );
 }
 
 class _ThinkingDots extends StatelessWidget {
   @override
-  Widget build(BuildContext context) {
-    return const Row(children: [
+  Widget build(BuildContext context) => const Row(
+    children: [
       Text("...", style: TextStyle(color: Colors.white38, fontSize: 20))
-    ]);
-  }
+    ],
+  );
 }
 
 class _ParticleBackground extends StatelessWidget {
   final int count;
   const _ParticleBackground({required this.count});
   @override
-  Widget build(BuildContext context) {
-    return Opacity(
-      opacity: 0.3,
-      child: CustomPaint(
-        painter: _ChatParticlePainter(0.0, count),
-        size: MediaQuery.of(context).size,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Opacity(
+    opacity: 0.3,
+    child: CustomPaint(
+      painter: _ChatParticlePainter(0.0, count),
+      size: MediaQuery.of(context).size,
+    ),
+  );
 }
 
 class _ChatParticlePainter extends CustomPainter {
@@ -1088,10 +1105,11 @@ class _ChatParticlePainter extends CustomPainter {
     final paint = Paint()..color = Colors.white10;
     for (int i = 0; i < count; i++) {
       canvas.drawCircle(
-          Offset(math.Random().nextDouble() * size.width,
-              math.Random().nextDouble() * size.height),
-          1.5,
-          paint);
+        Offset(math.Random().nextDouble() * size.width,
+            math.Random().nextDouble() * size.height),
+        1.5,
+        paint,
+      );
     }
   }
 
@@ -1099,6 +1117,7 @@ class _ChatParticlePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+// ── Animated dropdown (model selector) ───────────────────────────────────────
 class AnimatedDropdown extends StatefulWidget {
   final Widget child;
   final List<DropdownMenuItemData> items;
@@ -1121,8 +1140,8 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   bool _isOpen = false;
-  late AnimationController _animationController;
-  late Animation<double> _expandAnimation;
+  late final AnimationController _animationController;
+  late final Animation<double> _expandAnimation;
 
   @override
   void initState() {
@@ -1146,21 +1165,22 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
 
   void _showDropdown() {
     if (_overlayEntry != null) return;
-    final RenderBox renderBox = context.findRenderObject() as RenderBox;
+    final renderBox = context.findRenderObject() as RenderBox;
     final size = renderBox.size;
 
     _overlayEntry = OverlayEntry(
       builder: (context) => Stack(
         children: [
+          // Dismiss area
           Positioned.fill(
             child: GestureDetector(
                 behavior: HitTestBehavior.translucent,
                 onTap: _closeDropdown,
-                child: Container(color: Colors.transparent)),
+                child: const ColoredBox(color: Colors.transparent)),
           ),
+          // Dropdown content
           CompositedTransformFollower(
             link: _layerLink,
-            showWhenUnlinked: false,
             offset: Offset(0, size.height + 8),
             child: Material(
               color: Colors.transparent,
@@ -1172,7 +1192,8 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
                   decoration: BoxDecoration(
                     color: widget.backgroundColor,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    border:
+                    Border.all(color: Colors.white.withOpacity(0.1)),
                     boxShadow: [
                       BoxShadow(
                           color: Colors.black.withOpacity(0.3),
@@ -1189,13 +1210,14 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: widget.items.map((item) {
-                            if (item.isDivider)
+                            if (item.isDivider) {
                               return Divider(
                                 height: 1,
                                 color: Colors.white.withOpacity(0.1),
                                 indent: 16,
                                 endIndent: 16,
                               );
+                            }
                             return _DropdownItemWidget(
                               item: item,
                               onItemTapped: () {
@@ -1220,7 +1242,7 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
     _animationController.forward();
   }
 
-  void _closeDropdown() async {
+  Future<void> _closeDropdown() async {
     await _animationController.reverse();
     _removeOverlay();
   }
@@ -1232,13 +1254,13 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   }
 
   @override
-  Widget build(BuildContext context) {
-    return CompositedTransformTarget(
-        link: _layerLink,
-        child: GestureDetector(onTap: _toggleDropdown, child: widget.child));
-  }
+  Widget build(BuildContext context) => CompositedTransformTarget(
+    link: _layerLink,
+    child: GestureDetector(onTap: _toggleDropdown, child: widget.child),
+  );
 }
 
+// ── Dropdown data model ─────────────────────────────────────────────────────
 class DropdownMenuItemData {
   final String title;
   final String? subtitle;
@@ -1249,7 +1271,7 @@ class DropdownMenuItemData {
   final bool isDivider;
   final bool isDisabled;
 
-  DropdownMenuItemData({
+  const DropdownMenuItemData({
     this.title = '',
     this.subtitle,
     this.trailing,
@@ -1261,9 +1283,10 @@ class DropdownMenuItemData {
   });
 
   factory DropdownMenuItemData.divider() =>
-      DropdownMenuItemData(isDivider: true);
+      const DropdownMenuItemData(isDivider: true);
 }
 
+// ── Individual dropdown item widget ───────────────────────────────────────
 class _DropdownItemWidget extends StatefulWidget {
   final DropdownMenuItemData item;
   final VoidCallback onItemTapped;
@@ -1278,63 +1301,60 @@ class _DropdownItemWidget extends StatefulWidget {
 class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
   bool _isHovered = false;
   @override
-  Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) {
-        if (!widget.item.isDisabled) setState(() => _isHovered = true);
-      },
-      onExit: (_) {
-        if (!widget.item.isDisabled) setState(() => _isHovered = false);
-      },
-      cursor: widget.item.isDisabled
-          ? SystemMouseCursors.basic
-          : SystemMouseCursors.click,
-      child: GestureDetector(
-        onTap: widget.item.isDisabled ? null : widget.onItemTapped,
-        child: Container(
-          color: _isHovered
-              ? Colors.white.withOpacity(0.05)
-              : Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Text(widget.item.title,
-                          style: TextStyle(
-                              color: widget.item.isDisabled
-                                  ? Colors.white.withOpacity(0.3)
-                                  : Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600)),
-                      if (widget.item.titleTrailing != null) ...[
-                        const SizedBox(width: 8),
-                        widget.item.titleTrailing!
-                      ],
-                    ]),
-                    if (widget.item.subtitle != null) ...[
-                      const SizedBox(height: 4),
-                      Text(widget.item.subtitle!,
-                          style: TextStyle(
-                              color: widget.item.isDisabled
-                                  ? Colors.white.withOpacity(0.3)
-                                  : Colors.white.withOpacity(0.5),
-                              fontSize: 13))
+  Widget build(BuildContext context) => MouseRegion(
+    onEnter: (_) {
+      if (!widget.item.isDisabled) setState(() => _isHovered = true);
+    },
+    onExit: (_) {
+      if (!widget.item.isDisabled) setState(() => _isHovered = false);
+    },
+    cursor: widget.item.isDisabled
+        ? SystemMouseCursors.basic
+        : SystemMouseCursors.click,
+    child: GestureDetector(
+      onTap: widget.item.isDisabled ? null : widget.onItemTapped,
+      child: Container(
+        color:
+        _isHovered ? Colors.white.withOpacity(0.05) : Colors.transparent,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text(widget.item.title,
+                        style: TextStyle(
+                            color: widget.item.isDisabled
+                                ? Colors.white.withOpacity(0.3)
+                                : Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600)),
+                    if (widget.item.titleTrailing != null) ...[
+                      const SizedBox(width: 8),
+                      widget.item.titleTrailing!
                     ],
+                  ]),
+                  if (widget.item.subtitle != null) ...[
+                    const SizedBox(height: 4),
+                    Text(widget.item.subtitle!,
+                        style: TextStyle(
+                            color: widget.item.isDisabled
+                                ? Colors.white.withOpacity(0.3)
+                                : Colors.white.withOpacity(0.5),
+                            fontSize: 13))
                   ],
-                ),
+                ],
               ),
-              if (widget.item.trailing != null) ...[
-                const SizedBox(width: 12),
-                widget.item.trailing!
-              ],
+            ),
+            if (widget.item.trailing != null) ...[
+              const SizedBox(width: 12),
+              widget.item.trailing!
             ],
-          ),
+          ],
         ),
       ),
-    );
-  }
+    ),
+  );
 }

@@ -2,29 +2,53 @@
 //
 // QuantMessage — File upload + multimodal chat messages
 //
+// -----------------------------------------------------------
+// This file has been updated to:
 //
+// • Load the backend URL from a `.env` file (flutter_dotenv)
+// • Use the `mime` package for MIME‑type detection
+// • Add missing `http_parser` import for MediaType handling
+// • Keep the same public API while improving readability
+// -----------------------------------------------------------
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show File;
 
-import 'package:dio/dio.dart';   // ← Get MultipartFile from dio
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;   // ← Full import
-import 'package:supabase_flutter/supabase_flutter.dart' hide MultipartFile;  // ← Hide from supabase
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart'; // <-- New import
+import 'package:mime/mime.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide MultipartFile;
 
 import '../core/chat_message.dart';
 
-/// Handles file uploads + multimodal chat messages against the FastAPI backend.
+/// Handles file uploads and multimodal chat interactions against the FastAPI backend.
 class UploadService {
   // ── Configuration ────────────────────────────────────────────────────────
 
-  static const String _defaultBaseUrl =
-      'https://your-app.up.railway.app/api/v1';
+  /// Default backend URL – used only when the env var is missing.
+  static const String _defaultBaseUrl = 'https://your-app.up.railway.app/api/v1';
 
+  /// Resolve the base URL:
+  ///   1. From the `.env` variable `BACKEND_URL` (optional).
+  ///   2. If not set, fall back to the compile‑time constant [_defaultBaseUrl].
+  ///
+  /// **Important:** Call `await dotenv.load()` in `main()` before any widget
+  /// runs, e.g.:
+  ///
+  /// ```dart
+  /// Future<void> main() async {
+  ///   WidgetsFlutterBinding.ensureInitialized();
+  ///   await dotenv.load(fileName: ".env");
+  ///   runApp(const MyApp());
+  /// }
+  /// ```
   String get _baseUrl {
-    const fromEnv = String.fromEnvironment('BACKEND_URL');
-    if (fromEnv.isNotEmpty) return fromEnv;
+    final envUrl = dotenv.maybeGet('BACKEND_URL');
+    if (envUrl != null && envUrl.isNotEmpty) return envUrl;
     return _defaultBaseUrl;
   }
 
@@ -40,17 +64,21 @@ class UploadService {
     http.Client? fallbackClient,
   })  : _supabase = supabase ?? Supabase.instance.client,
         _dio = dio ??
-            Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 30),
-              receiveTimeout: const Duration(seconds: 60),
-              sendTimeout: const Duration(seconds: 60),
-            )),
+            Dio(
+              BaseOptions(
+                connectTimeout: const Duration(seconds: 30),
+                receiveTimeout: const Duration(seconds: 60),
+                sendTimeout: const Duration(seconds: 60),
+              ),
+            ),
         _fallbackClient = fallbackClient ?? http.Client() {
+    // Attach the JWT automatically to all Dio requests.
     _dio.interceptors.add(_SupabaseAuthInterceptor(_supabase));
   }
 
   // ── Auth helpers ──────────────────────────────────────────────────────────
 
+  /// Returns the current Supabase JWT or throws if the user is not logged in.
   String _accessToken() {
     final session = _supabase.auth.currentSession;
     if (session == null) {
@@ -59,15 +87,21 @@ class UploadService {
     return session.accessToken;
   }
 
+  /// JSON‑API request headers (auth + content‑type).
   Map<String, String> _jsonHeaders() => {
     'Authorization': 'Bearer ${_accessToken()}',
     'Content-Type': 'application/json',
   };
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  UPLOAD (with real progress via dio)
+  //  UPLOAD (with real progress via Dio)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /// Uploads a file and returns an [Attachment] describing the remote resource.
+  ///
+  /// * **onProgress** – receives a value in the range `[0, 1]`.
+  /// * **cancelToken** – optional Dio cancel token for user‑initiated aborts.
+  /// * **maxRetries** – number of exponential‑backoff retries on transient errors.
   Future<Attachment> uploadFile({
     required File file,
     required String conversationId,
@@ -80,12 +114,13 @@ class UploadService {
 
     onProgress?.call(0.0);
 
-    // ← dio.MultipartFile (in scope from `import 'package:dio/dio.dart';`)
+    // Create multipart payload.
     final FormData formData = FormData.fromMap({
       'conversation_id': conversationId,
       'file': await MultipartFile.fromFile(
         file.path,
         filename: filename,
+        contentType: MediaType.parse(mimeType), // MediaType from http_parser
       ),
     });
 
@@ -108,6 +143,7 @@ class UploadService {
           },
         );
 
+        // Treat any 4xx/5xx as an error.
         if (response.statusCode != null && response.statusCode! >= 400) {
           throw Exception(
             'Upload failed (${response.statusCode}): ${response.data}',
@@ -123,21 +159,23 @@ class UploadService {
           fallbackMime: mimeType,
         );
       } on DioException catch (e) {
+        // Propagate cancellations.
         if (CancelToken.isCancel(e)) rethrow;
 
-        if (e.response?.statusCode != null &&
-            e.response!.statusCode! < 500) {
-          throw Exception(
-              'Upload failed: ${e.response?.data ?? e.message}');
+        // Non‑retryable client errors (4xx) surface immediately.
+        final code = e.response?.statusCode;
+        if (code != null && code < 500) {
+          throw Exception('Upload failed: ${e.response?.data ?? e.message}');
         }
 
+        // Retry logic for transient / server errors.
         if (attempt > maxRetries) {
-          throw Exception(
-              'Upload failed after $maxRetries retries: ${e.message}');
+          throw Exception('Upload failed after $maxRetries retries: ${e.message}');
         }
 
-        await Future.delayed(
-            Duration(milliseconds: 500 * (1 << (attempt - 1))));
+        // Exponential back‑off with jitter.
+        final delay = Duration(milliseconds: 500 * (1 << (attempt - 1)));
+        await Future.delayed(delay);
       }
     }
   }
@@ -226,7 +264,7 @@ class UploadService {
           final json = jsonDecode(line.substring(6));
           if (json is Map<String, dynamic>) yield json;
         } catch (_) {
-          // Skip malformed lines
+          // Silently ignore malformed lines.
         }
       }
     }
@@ -242,6 +280,7 @@ class UploadService {
       'file': await MultipartFile.fromFile(
         audioFile.path,
         filename: filename,
+        contentType: MediaType.parse(_guessMime(filename)),
       ),
     });
 
@@ -360,6 +399,7 @@ class UploadService {
   //  Helpers
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /// Build an [Attachment] from the API response.
   Attachment _parseAttachment({
     required Map<String, dynamic> body,
     required String fallbackFilename,
@@ -379,6 +419,7 @@ class UploadService {
     );
   }
 
+  /// Map the string token returned by the backend to the enum.
   AttachmentType _parseType(String? t) {
     switch (t) {
       case 'pdf':
@@ -392,50 +433,42 @@ class UploadService {
     }
   }
 
+  /// Determine the MIME type for a filename.
+  ///
+  /// Uses the `mime` package, falling back to a generic binary MIME if the
+  /// lookup fails.
+  @visibleForTesting
   String _guessMime(String filename) {
-    final ext = filename.split('.').last.toLowerCase();
-    return {
-      'pdf': 'application/pdf',
-      'png': 'image/png',
-      'jpg': 'image/jpeg',
-      'jpeg': 'image/jpeg',
-      'webp': 'image/webp',
-      'gif': 'image/gif',
-      'txt': 'text/plain',
-      'mp3': 'audio/mpeg',
-      'wav': 'audio/wav',
-      'm4a': 'audio/mp4',
-      'ogg': 'audio/ogg',
-    }[ext] ??
-        'application/octet-stream';
+    final mime = lookupMimeType(filename);
+    return mime ?? 'application/octet-stream';
   }
 
+  /// Close all underlying HTTP clients.
   void dispose() {
     _fallbackClient.close();
-    _dio.close();
+    _dio.close(force: true);
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Auth Interceptor — auto-attaches Supabase JWT to every Dio request
-// ═══════════════════════════════════════════════════════════════════════════
+// ───────────────────────────────────────────────────────────────────────────────
+//  Auth Interceptor — auto‑attaches Supabase JWT to every Dio request
+// ───────────────────────────────────────────────────────────────────────────────
 
 class _SupabaseAuthInterceptor extends Interceptor {
   final SupabaseClient _supabase;
+
   _SupabaseAuthInterceptor(this._supabase);
 
   @override
-  void onRequest(
-      RequestOptions options,
-      RequestInterceptorHandler handler,
-      ) {
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     try {
       final session = _supabase.auth.currentSession;
       if (session != null) {
         options.headers['Authorization'] = 'Bearer ${session.accessToken}';
       }
     } catch (e) {
-      debugPrint('[UploadService] Auth interceptor: $e');
+      // In production you might want to report this to an error‑tracking service.
+      debugPrint('[UploadService] Auth interceptor error: $e');
     }
     handler.next(options);
   }

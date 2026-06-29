@@ -1,14 +1,23 @@
 // lib/screens/widgets/attachment_picker_sheet.dart
-// WEB + MOBILE COMPATIBLE — VERIFIED
+// ------------------------------------------------------------
+//   Cross‑platform attachment picker (mobile + web)
+//   Updated to use the `mime` package from pubspec.yaml for
+//   reliable MIME‑type detection.
+// ------------------------------------------------------------
 
-import 'dart:io' show File;                  // ← Tree-shaken on web
+import 'dart:io' show File;               // Tree‑shaken on web
 import 'dart:typed_data';
-import 'package:cross_file/cross_file.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:mime/mime.dart'; // ← New import for MIME lookup
 
+/// Signature for the callback that receives the selected attachment.
+///
+/// * **bytes** – raw file bytes (already read from the picker).
+/// * **filename** – original file name (including extension).
+/// * **mimeType** – detected MIME type (e.g. `image/jpeg`).
 typedef AttachmentSelected = void Function(
     Uint8List bytes,
     String filename,
@@ -19,6 +28,7 @@ class AttachmentPickerSheet extends StatefulWidget {
   final AttachmentSelected onSelected;
   const AttachmentPickerSheet({super.key, required this.onSelected});
 
+  /// Convenience helper to present the bottom‑sheet.
   static Future<void> show(
       BuildContext context, {
         required AttachmentSelected onSelected,
@@ -42,10 +52,26 @@ class AttachmentPickerSheet extends StatefulWidget {
 
 class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     with SingleTickerProviderStateMixin {
+  // ── Animations ─────────────────────────────────────────────────────────
   late final AnimationController _entryCtrl;
   late final Animation<double> _slideAnim;
   late final Animation<double> _fadeAnim;
+
+  // ── UI state ───────────────────────────────────────────────────────────
   bool _busy = false;
+
+  // ── Allowed extensions (kept in one place for easy updates) ────────
+  static const List<String> _allowedExtensions = [
+    'pdf',
+    'txt',
+    'doc',
+    'docx',
+    'png',
+    'jpg',
+    'jpeg',
+    'webp',
+    'gif',
+  ];
 
   @override
   void initState() {
@@ -66,7 +92,7 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     super.dispose();
   }
 
-  // ── Pickers (cross-platform) ─────────────────────────────────────────────
+  // ── ── ── PICKERS (cross‑platform) ── ── ────────────────────────────────
 
   Future<void> _pickFromGallery() async {
     if (_busy) return;
@@ -106,6 +132,7 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
       );
       if (image != null && mounted) {
         final bytes = await image.readAsBytes();
+        // For a freshly captured photo we can safely assume JPEG.
         widget.onSelected(bytes, image.name, 'image/jpeg');
         if (mounted) Navigator.of(context).pop();
       }
@@ -122,18 +149,16 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: [
-          'pdf', 'txt', 'doc', 'docx', 'png', 'jpg', 'jpeg', 'webp'
-        ],
-        withData: true,
+        allowedExtensions: _allowedExtensions,
+        withData: true, // gives us `bytes` on web & desktop
       );
 
       if (result == null || result.files.isEmpty) return;
 
-      final picked = result.files.single;
+      final PlatformFile picked = result.files.single;
       Uint8List? bytes = picked.bytes;
 
-      // Mobile fallback: read from disk
+      // Mobile fallback – read the file from the native file system.
       if (bytes == null && picked.path != null) {
         final file = File(picked.path!);
         bytes = await file.readAsBytes();
@@ -150,22 +175,14 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     }
   }
 
+  // ── MIME‑type helper (uses `mime` package) ────────────────────────
   String _guessMime(String filename) {
-    final ext = filename.split('.').last.toLowerCase();
-    return {
-      'png': 'image/png',
-      'jpg': 'image/jpeg',
-      'jpeg': 'image/jpeg',
-      'webp': 'image/webp',
-      'gif': 'image/gif',
-      'pdf': 'application/pdf',
-      'txt': 'text/plain',
-      'doc': 'application/msword',
-      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    }[ext] ??
-        'application/octet-stream';
+    // `lookupMimeType` returns `null` if it cannot guess – we fallback
+    // to a generic binary type.
+    return lookupMimeType(filename) ?? 'application/octet-stream';
   }
 
+  // ── UI helpers ───────────────────────────────────────────────────────
   void _showError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -177,13 +194,12 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
     );
   }
 
+  // ── Build UI ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, 1),
-        end: Offset.zero,
-      ).animate(_slideAnim),
+      position: Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
+          .animate(_slideAnim),
       child: FadeTransition(
         opacity: _fadeAnim,
         child: SafeArea(
@@ -214,6 +230,7 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // ── Drag‑handle ───────────────────────────────────────
                   Center(
                     child: Container(
                       width: 40,
@@ -225,6 +242,8 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
                       ),
                     ),
                   ),
+
+                  // ── Header ─────────────────────────────────────────────
                   const Row(
                     children: [
                       Icon(Icons.add_circle_outline,
@@ -251,11 +270,11 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
                     ),
                   ),
                   const SizedBox(height: 20),
+
+                  // ── Options ───────────────────────────────────────────────
                   _OptionTile(
                     icon: Icons.image_outlined,
-                    title: kIsWeb
-                        ? 'Image from Computer'
-                        : 'Photo from Gallery',
+                    title: kIsWeb ? 'Image from Computer' : 'Photo from Gallery',
                     subtitle: 'JPG, PNG, WebP, GIF',
                     onTap: _pickFromGallery,
                     enabled: !_busy,
@@ -274,12 +293,14 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
                     onTap: _pickFile,
                     enabled: !_busy,
                   ),
+
+                  // ── Busy indicator ───────────────────────────────────────
                   if (_busy)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
+                        children: [
                           SizedBox(
                             width: 18,
                             height: 18,
@@ -292,14 +313,16 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
                         ],
                       ),
                     ),
+
+                  // ── Web‑only tip ─────────────────────────────────────────────
                   if (kIsWeb)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
                       child: Row(
                         children: [
                           Icon(Icons.info_outline,
                               size: 14, color: Colors.white24),
-                          const SizedBox(width: 6),
+                          SizedBox(width: 6),
                           Expanded(
                             child: Text(
                               'Tip: Ctrl+V (⌘+V) to paste images from clipboard',
@@ -320,12 +343,14 @@ class _AttachmentPickerSheetState extends State<AttachmentPickerSheet>
   }
 }
 
+// ── Reusable tile widget ───────────────────────────────────────────────────
 class _OptionTile extends StatefulWidget {
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
   final bool enabled;
+
   const _OptionTile({
     required this.icon,
     required this.title,
@@ -344,7 +369,7 @@ class _OptionTileState extends State<_OptionTile> {
 
   @override
   Widget build(BuildContext context) {
-    final color =
+    final Color baseColor =
     widget.enabled ? Colors.white : Colors.white.withOpacity(0.3);
 
     return MouseRegion(
@@ -358,21 +383,14 @@ class _OptionTileState extends State<_OptionTile> {
           ? SystemMouseCursors.click
           : SystemMouseCursors.basic,
       child: GestureDetector(
-        onTapDown: widget.enabled
-            ? (_) => setState(() => _pressed = true)
-            : null,
-        onTapUp: widget.enabled
-            ? (_) => setState(() => _pressed = false)
-            : null,
-        onTapCancel: widget.enabled
-            ? () => setState(() => _pressed = false)
-            : null,
+        onTapDown: widget.enabled ? (_) => setState(() => _pressed = true) : null,
+        onTapUp: widget.enabled ? (_) => setState(() => _pressed = false) : null,
+        onTapCancel: widget.enabled ? () => setState(() => _pressed = false) : null,
         onTap: widget.enabled ? widget.onTap : null,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           margin: const EdgeInsets.symmetric(vertical: 4),
-          padding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           decoration: BoxDecoration(
             color: _pressed
                 ? Colors.white.withOpacity(0.10)
@@ -395,7 +413,7 @@ class _OptionTileState extends State<_OptionTile> {
                   color: const Color(0xFFE27457).withOpacity(0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(widget.icon, color: color, size: 22),
+                child: Icon(widget.icon, color: baseColor, size: 22),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -405,7 +423,7 @@ class _OptionTileState extends State<_OptionTile> {
                   children: [
                     Text(widget.title,
                         style: TextStyle(
-                            color: color,
+                            color: baseColor,
                             fontSize: 15,
                             fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
