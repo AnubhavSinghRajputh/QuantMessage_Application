@@ -1,10 +1,9 @@
 // lib/main.dart
-//
-
 
 import 'dart:async';
 import 'dart:ui';
 import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +11,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';  // ← ADDED
 
 import 'services/quant_space_api.dart';
 import 'core/app_theme.dart';
@@ -19,12 +19,25 @@ import 'screens/splash_screen.dart';
 import 'screens/signin_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/app_bar.dart';
-// Sidebar (same directory as before — adjust path if needed)
 import 'screens/sidebar_panel/left_sidebar.dart';
-// InfinityAnimation (adjust path to match your project)
 import 'screens/animations/animation_effects/infinity_animation.dart';
 
-void main() {
+// ═══════════════════════════════════════════════════════════════════════════
+//  App entry point — async + Supabase.initialize()
+// ═══════════════════════════════════════════════════════════════════════════
+
+Future<void> main() async {
+  // ← 1. Required: bind Flutter to native engine
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // ← 2. CRITICAL: Initialize Supabase BEFORE runApp()
+  await Supabase.initialize(
+    url: 'https://your-project.supabase.co',   // ← REPLACE with your URL
+    anonKey: 'your-anon-key-here',              // ← REPLACE with your anon key
+    debug: true,                                // ← set false in production
+  );
+
+  // ← 3. Now safe to start the app
   runApp(const ProviderScope(child: QuantSpaceApp()));
 }
 
@@ -80,49 +93,44 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen>
     with TickerProviderStateMixin {
-  // ── Nav (kept from main.dart) ──────────────────────────────────────────────
   int _navIndex = 1;
 
-  // ── API + controllers ──────────────────────────────────────────────────────
-  final TextEditingController _controller    = TextEditingController();
-  final ScrollController      _scrollCtrl    = ScrollController();
-  final QuantSpaceApi         _api           = QuantSpaceApi();
-  final ImagePicker           _picker        = ImagePicker();
-  final FocusNode             _inputFocus    = FocusNode();
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scrollCtrl = ScrollController();
+  final QuantSpaceApi _api = QuantSpaceApi();
+  final ImagePicker _picker = ImagePicker();
+  final FocusNode _inputFocus = FocusNode();
 
   final List<ChatMessage> _messages = [];
   bool _isTyping = false;
 
   String _selectedModelName = 'Gemini 1.5 Flash';
-  String _selectedModelId   = 'gemini/gemini-1.5-flash';
+  String _selectedModelId = 'gemini/gemini-1.5-flash';
 
-  // ── Animation controllers ──────────────────────────────────────────────────
   late final AnimationController _inputFocusCtrl;
-  late final Animation<double>   _inputBorderOpacity;
+  late final Animation<double> _inputBorderOpacity;
 
   late final AnimationController _sendBtnCtrl;
-  late final Animation<double>   _sendBtnScale;
+  late final Animation<double> _sendBtnScale;
 
   late final AnimationController _emptyCtrl;
-  late final Animation<double>   _emptyOpacity;
-  late final Animation<double>   _emptyScale;
+  late final Animation<double> _emptyOpacity;
+  late final Animation<double> _emptyScale;
 
-  // ── Model list ─────────────────────────────────────────────────────────────
   final List<Map<String, String>> _aiModels = [
-    {'name': 'Gemini 1.5 Flash',   'id': 'gemini/gemini-1.5-flash',                       'icon': '✨'},
-    {'name': 'GPT-4o',             'id': 'openai/gpt-4o',                                  'icon': '🧠'},
-    {'name': 'Claude 3.5 Sonnet',  'id': 'openrouter/anthropic/claude-3.5-sonnet',         'icon': '🎭'},
-    {'name': 'QuantCore 1.0',      'id': 'groq/llama-3.1-70b-versatile',                   'icon': '⚡'},
-    {'name': 'Llama 3.1 8B (Groq)','id': 'groq/llama-3.1-8b-instant',                     'icon': '🚀'},
-    {'name': 'Mixtral 8x7B (Groq)','id': 'groq/mixtral-8x7b-32768',                        'icon': '🔥'},
-    {'name': 'DeepSeek Chat',      'id': 'openrouter/deepseek/deepseek-chat',               'icon': '🤖'},
+    {'name': 'Gemini 1.5 Flash', 'id': 'gemini/gemini-1.5-flash', 'icon': '✨'},
+    {'name': 'GPT-4o', 'id': 'openai/gpt-4o', 'icon': '🧠'},
+    {'name': 'Claude 3.5 Sonnet', 'id': 'openrouter/anthropic/claude-3.5-sonnet', 'icon': '🎭'},
+    {'name': 'QuantCore 1.0', 'id': 'groq/llama-3.1-70b-versatile', 'icon': '⚡'},
+    {'name': 'Llama 3.1 8B (Groq)', 'id': 'groq/llama-3.1-8b-instant', 'icon': '🚀'},
+    {'name': 'Mixtral 8x7B (Groq)', 'id': 'groq/mixtral-8x7b-32768', 'icon': '🔥'},
+    {'name': 'DeepSeek Chat', 'id': 'openrouter/deepseek/deepseek-chat', 'icon': '🤖'},
   ];
 
   @override
   void initState() {
     super.initState();
 
-    // Input border glow
     _inputFocusCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 260));
     _inputBorderOpacity =
@@ -131,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen>
         ? _inputFocusCtrl.forward()
         : _inputFocusCtrl.reverse());
 
-    // Send button press
     _sendBtnCtrl = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 110),
@@ -140,7 +147,6 @@ class _HomeScreenState extends State<HomeScreen>
     _sendBtnScale = Tween<double>(begin: 1.0, end: 0.86).animate(
         CurvedAnimation(parent: _sendBtnCtrl, curve: Curves.easeInOut));
 
-    // Empty state entrance
     _emptyCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 650));
     _emptyOpacity =
@@ -161,7 +167,7 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  // ── Tools (unchanged from main.dart) ──────────────────────────────────────
+  // ── Tools ─────────────────────────────────────────────────────────────────
   void _showToolsMenu() {
     showModalBottomSheet(
       context: context,
@@ -172,10 +178,10 @@ class _HomeScreenState extends State<HomeScreen>
           _controller.text =
           'Tell me the current weather and forecast for my location.';
         },
-        onQR:          _startQRScanner,
+        onQR: _startQRScanner,
         onImageSearch: _pickImageAndSearch,
-        onAnalyze:     _pickImageAndAnalyze,
-        onGenImage:    _pickPromptAndGenerateImage,
+        onAnalyze: _pickImageAndAnalyze,
+        onGenImage: _pickPromptAndGenerateImage,
       ),
     );
   }
@@ -274,7 +280,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Send (unchanged from main.dart) ───────────────────────────────────────
+  // ── Send ───────────────────────────────────────────────────────────────────
   void _handleSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _isTyping) return;
@@ -349,7 +355,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final double screenWidth = MediaQuery.of(context).size.width;
-    final bool   isDesktop   = screenWidth > 600;
+    final bool isDesktop = screenWidth > 600;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -357,7 +363,6 @@ class _HomeScreenState extends State<HomeScreen>
       appBar: _buildBlurredAppBar(),
       body: Row(
         children: [
-          // ── Left sidebar (from chat_screen.dart) ─────────────────────
           LeftSidebar(
             onNewChat: () {
               setState(() {
@@ -366,15 +371,10 @@ class _HomeScreenState extends State<HomeScreen>
               });
             },
           ),
-
-          // ── Main chat area ────────────────────────────────────────────
           Expanded(
             child: Stack(
               children: [
-                // Subtle particle background
                 const _ParticleBackground(count: 22),
-
-                // Chat thread OR empty state
                 if (_messages.isEmpty)
                   _buildEmptyState()
                 else
@@ -388,15 +388,11 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ],
                   ),
-
-                // Floating input on empty state
                 if (_messages.isEmpty)
                   Positioned(
                     left: 0, right: 0, bottom: 0,
                     child: _buildFloatingInput(),
                   ),
-
-                // Bottom nav (kept from main.dart)
                 if (!isDesktop)
                   Positioned(
                     bottom: 0, left: 0, right: 0,
@@ -423,7 +419,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Blurred app bar ────────────────────────────────────────────────────────
   PreferredSizeWidget _buildBlurredAppBar() {
     return PreferredSize(
       preferredSize: const Size.fromHeight(64),
@@ -437,30 +432,28 @@ class _HomeScreenState extends State<HomeScreen>
             automaticallyImplyLeading: false,
             title: Row(
               children: [
-                // QuantCore wordmark
                 Text(
                   'QuantCore',
                   style: GoogleFonts.nunito(
-                    fontWeight:    FontWeight.w900,
-                    fontSize:      20,
-                    color:         AppTheme.primaryRed,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 20,
+                    color: AppTheme.primaryRed,
                     letterSpacing: 1.5,
                   ),
                 ),
                 const SizedBox(width: 14),
-                // Model selector — AnimatedDropdown from chat_screen.dart
                 AnimatedDropdown(
                   backgroundColor: const Color(0xFF2D2D2D),
                   dropdownWidth: 280,
                   items: _aiModels.map((m) {
                     return DropdownMenuItemData(
-                      title:    m['name']!,
+                      title: m['name']!,
                       subtitle: 'Powered by ${m['id']!.split('/').last}',
                       trailing: Text(m['icon']!,
                           style: const TextStyle(fontSize: 16)),
                       onTap: () => setState(() {
                         _selectedModelName = m['name']!;
-                        _selectedModelId   = m['id']!;
+                        _selectedModelId = m['id']!;
                       }),
                     );
                   }).toList(),
@@ -496,7 +489,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ── Greeting / empty state — InfinityAnimation replaces pulsing icon ───────
   Widget _buildEmptyState() {
     return FadeTransition(
       opacity: _emptyOpacity,
@@ -510,15 +502,14 @@ class _HomeScreenState extends State<HomeScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // ── InfinityAnimation greeting (from chat_screen.dart) ──
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     SizedBox(
                       width: 90, height: 46,
                       child: InfinityAnimation(
-                        size:     90,
-                        color:    AppTheme.primaryRed,
+                        size: 90,
+                        color: AppTheme.primaryRed,
                         duration: const Duration(seconds: 5),
                       ),
                     ),
@@ -527,13 +518,13 @@ class _HomeScreenState extends State<HomeScreen>
                       child: Text(
                         '< Welcome Back >',
                         style: GoogleFonts.outfit(
-                          color:       const Color(0xFFE8E8E8),
-                          fontSize:    46,
-                          fontWeight:  FontWeight.w900,
+                          color: const Color(0xFFE8E8E8),
+                          fontSize: 46,
+                          fontWeight: FontWeight.w900,
                           letterSpacing: -0.5,
                         ),
                         textAlign: TextAlign.center,
-                        overflow:  TextOverflow.ellipsis,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -543,25 +534,24 @@ class _HomeScreenState extends State<HomeScreen>
                   '< How May You be Helped >',
                   textAlign: TextAlign.center,
                   style: GoogleFonts.outfit(
-                    color:      AppTheme.textSecondary.withOpacity(0.5),
-                    fontSize:   18,
+                    color: AppTheme.textSecondary.withOpacity(0.5),
+                    fontSize: 18,
                     fontWeight: FontWeight.w300,
                   ),
                 ),
                 const SizedBox(height: 40),
-                // Auth buttons (from main.dart)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     _AnimatedButton(
-                      label:   'Sign In',
-                      filled:  true,
+                      label: 'Sign In',
+                      filled: true,
                       onTap: () => Navigator.push(
                           context, _smoothRoute(const SignInScreen())),
                     ),
                     const SizedBox(width: 16),
                     _AnimatedButton(
-                      label:  'Sign Up',
+                      label: 'Sign Up',
                       filled: false,
                       onTap: () => Navigator.push(
                           context, _smoothRoute(const SignUpScreen())),
@@ -583,16 +573,15 @@ class _HomeScreenState extends State<HomeScreen>
       spacing: 8, runSpacing: 8,
       alignment: WrapAlignment.center,
       children: [
-        _SuggestionPill(Icons.edit_outlined,   'Write'),
+        _SuggestionPill(Icons.edit_outlined, 'Write'),
         _SuggestionPill(Icons.school_outlined, 'Learn'),
-        _SuggestionPill(Icons.code,            'Code'),
+        _SuggestionPill(Icons.code, 'Code'),
         _SuggestionPill(Icons.coffee_outlined, 'Life stuff'),
-        _SuggestionPill(Icons.lightbulb_outline,'Something New'),
+        _SuggestionPill(Icons.lightbulb_outline, 'Something New'),
       ],
     );
   }
 
-  // ── Chat thread ────────────────────────────────────────────────────────────
   Widget _buildChatThread() {
     return ListView.builder(
       controller: _scrollCtrl,
@@ -602,9 +591,9 @@ class _HomeScreenState extends State<HomeScreen>
       itemBuilder: (context, index) {
         if (index == _messages.length) return _buildTypingIndicator();
         return _AnimatedMessageRow(
-          message:       _messages[index],
-          index:         index,
-          getModelIcon:  _getModelIcon,
+          message: _messages[index],
+          index: index,
+          getModelIcon: _getModelIcon,
         );
       },
     );
@@ -627,16 +616,15 @@ class _HomeScreenState extends State<HomeScreen>
     return Container(
       height: 32, width: 32,
       decoration: BoxDecoration(
-        color:        color.withOpacity(0.1),
+        color: color.withOpacity(0.1),
         borderRadius: BorderRadius.circular(8),
-        border:       Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Center(
           child: Text(icon, style: const TextStyle(fontSize: 14))),
     );
   }
 
-  // ── Input box (chat_screen style + main.dart tools button) ────────────────
   Widget _buildInputBox() {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 800),
@@ -644,7 +632,7 @@ class _HomeScreenState extends State<HomeScreen>
         animation: _inputBorderOpacity,
         builder: (_, child) => Container(
           decoration: BoxDecoration(
-            color:        const Color(0xFF2F2F2F),
+            color: const Color(0xFF2F2F2F),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: Color.lerp(
@@ -654,9 +642,9 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             boxShadow: [
               BoxShadow(
-                  color:      Colors.black.withOpacity(0.2),
+                  color: Colors.black.withOpacity(0.2),
                   blurRadius: 15,
-                  offset:     const Offset(0, 8))
+                  offset: const Offset(0, 8))
             ],
           ),
           child: child,
@@ -668,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen>
             children: [
               TextField(
                 controller: _controller,
-                focusNode:  _inputFocus,
+                focusNode: _inputFocus,
                 maxLines: 4, minLines: 1,
                 style: GoogleFonts.outfit(
                     color: Colors.white, fontSize: 16),
@@ -691,24 +679,22 @@ class _HomeScreenState extends State<HomeScreen>
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Tools button (from main.dart)
                       _AnimatedHoverIcon(
-                          icon:  Icons.auto_awesome_mosaic_rounded,
+                          icon: Icons.auto_awesome_mosaic_rounded,
                           onTap: _showToolsMenu),
                       const SizedBox(width: 8),
-                      // Model dropdown (from chat_screen.dart)
                       AnimatedDropdown(
                         backgroundColor: const Color(0xFF3B3B3B),
                         dropdownWidth: 260,
                         items: _aiModels.map((m) {
                           return DropdownMenuItemData(
-                            title:    m['name']!,
+                            title: m['name']!,
                             subtitle: 'Powered by ${m['id']!.split('/').last}',
                             trailing: Text(m['icon']!,
                                 style: const TextStyle(fontSize: 16)),
                             onTap: () => setState(() {
                               _selectedModelName = m['name']!;
-                              _selectedModelId   = m['id']!;
+                              _selectedModelId = m['id']!;
                             }),
                           );
                         }).toList(),
@@ -722,10 +708,9 @@ class _HomeScreenState extends State<HomeScreen>
                       _AnimatedHoverIcon(
                           icon: Icons.graphic_eq, onTap: () {}),
                       const SizedBox(width: 12),
-                      // Send button
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 250),
-                        switchInCurve:  Curves.easeOutBack,
+                        switchInCurve: Curves.easeOutBack,
                         switchOutCurve: Curves.easeIn,
                         transitionBuilder: (child, anim) =>
                             ScaleTransition(
@@ -734,7 +719,7 @@ class _HomeScreenState extends State<HomeScreen>
                                     opacity: anim, child: child)),
                         child: _isTyping
                             ? const Padding(
-                          key:     ValueKey('loading'),
+                          key: ValueKey('loading'),
                           padding: EdgeInsets.symmetric(
                               horizontal: 12),
                           child: SizedBox(
@@ -746,7 +731,7 @@ class _HomeScreenState extends State<HomeScreen>
                           ),
                         )
                             : Padding(
-                          key:     const ValueKey('send'),
+                          key: const ValueKey('send'),
                           padding: const EdgeInsets.all(4),
                           child: GestureDetector(
                             onTapDown: (_) =>
@@ -775,13 +760,12 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // Floating input used only on the empty state
   Widget _buildFloatingInput() {
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
-          end:   Alignment.bottomCenter,
+          end: Alignment.bottomCenter,
           colors: [
             AppTheme.backgroundBlack.withOpacity(0),
             AppTheme.backgroundBlack.withOpacity(0.85),
@@ -795,9 +779,10 @@ class _HomeScreenState extends State<HomeScreen>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Model chip for the app-bar dropdown trigger
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Model chip
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ModelChip extends StatefulWidget {
   final String name;
   final String icon;
@@ -814,7 +799,7 @@ class _ModelChipState extends State<_ModelChip> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
@@ -835,9 +820,9 @@ class _ModelChipState extends State<_ModelChip> {
             Text(
               widget.name,
               style: GoogleFonts.outfit(
-                  fontSize:   13,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color:      Colors.white),
+                  color: Colors.white),
             ),
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down,
@@ -850,10 +835,10 @@ class _ModelChipState extends State<_ModelChip> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Animated message row  (merged: main.dart image rendering + chat_screen
-//  slide/fade animation + MarkdownBody)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Animated message row
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _AnimatedMessageRow extends StatefulWidget {
   final ChatMessage message;
   final int index;
@@ -866,15 +851,14 @@ class _AnimatedMessageRow extends StatefulWidget {
   });
 
   @override
-  State<_AnimatedMessageRow> createState() =>
-      _AnimatedMessageRowState();
+  State<_AnimatedMessageRow> createState() => _AnimatedMessageRowState();
 }
 
 class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double>   _opacity;
-  late final Animation<Offset>   _slide;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _slide;
 
   @override
   void initState() {
@@ -886,7 +870,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
         CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
     _slide = Tween<Offset>(
       begin: Offset(widget.message.isUser ? 0.04 : -0.04, 0.06),
-      end:   Offset.zero,
+      end: Offset.zero,
     ).animate(
         CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.forward();
@@ -941,38 +925,38 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                               ? 'YOU'
                               : msg.modelName.toUpperCase(),
                           style: GoogleFonts.outfit(
-                            fontWeight:    FontWeight.w900,
-                            fontSize:      11,
-                            color:         Colors.white38,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 11,
+                            color: Colors.white38,
                             letterSpacing: 1.5,
                           ),
                         ),
                         const SizedBox(height: 6),
                         MarkdownBody(
-                          data:       msg.text,
+                          data: msg.text,
                           selectable: true,
                           styleSheet: MarkdownStyleSheet(
                             p: GoogleFonts.outfit(
                                 fontSize: 16,
-                                height:   1.6,
-                                color:    AppTheme.textPrimary),
+                                height: 1.6,
+                                color: AppTheme.textPrimary),
                             h1: GoogleFonts.outfit(
-                                color:      AppTheme.primaryRed,
-                                fontSize:   22,
+                                color: AppTheme.primaryRed,
+                                fontSize: 22,
                                 fontWeight: FontWeight.bold),
                             code: GoogleFonts.outfit(
                                 backgroundColor:
                                 const Color(0xFF1E1E1E),
-                                color:   Colors.orangeAccent,
+                                color: Colors.orangeAccent,
                                 fontSize: 14),
                             codeblockDecoration: BoxDecoration(
-                              color:        const Color(0xFF1E1E1E),
+                              color: const Color(0xFF1E1E1E),
                               borderRadius: BorderRadius.circular(12),
                               border:
                               Border.all(color: Colors.white10),
                             ),
                             blockquote: GoogleFonts.outfit(
-                                color:     Colors.white60,
+                                color: Colors.white60,
                                 fontStyle: FontStyle.italic),
                             blockquoteDecoration: const BoxDecoration(
                               border: Border(
@@ -1002,9 +986,9 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
     return Container(
       height: 34, width: 34,
       decoration: BoxDecoration(
-        color:        color.withOpacity(0.15),
+        color: color.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
-        border:       Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withOpacity(0.3)),
       ),
       child: Center(
           child: Text(icon, style: const TextStyle(fontSize: 14))),
@@ -1035,7 +1019,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
               errorBuilder: (_, __, ___) => Container(
                 height: 200, width: double.infinity,
                 decoration: BoxDecoration(
-                  color:        Colors.white.withOpacity(0.05),
+                  color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(24),
                 ),
                 child: Column(
@@ -1065,14 +1049,14 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color:        Colors.black54,
+                  color: Colors.black54,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text('GEN AI',
                     style: GoogleFonts.outfit(
-                        fontSize:   10,
+                        fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color:      Colors.white70)),
+                        color: Colors.white70)),
               ),
             ),
           ],
@@ -1082,12 +1066,13 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Suggestion pill (from chat_screen.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Suggestion pill
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _SuggestionPill extends StatefulWidget {
   final IconData icon;
-  final String   label;
+  final String label;
   const _SuggestionPill(this.icon, this.label);
 
   @override
@@ -1101,7 +1086,7 @@ class _SuggestionPillState extends State<_SuggestionPill> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -1125,7 +1110,7 @@ class _SuggestionPillState extends State<_SuggestionPill> {
             Text(widget.label,
                 style: GoogleFonts.outfit(
                     color: _hovered ? Colors.white : Colors.white70,
-                    fontSize:   13,
+                    fontSize: 13,
                     fontWeight: FontWeight.w500)),
           ],
         ),
@@ -1134,9 +1119,10 @@ class _SuggestionPillState extends State<_SuggestionPill> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Thinking dots  (staggered from main.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Thinking dots
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ThinkingDots extends StatefulWidget {
   @override
   State<_ThinkingDots> createState() => _ThinkingDotsState();
@@ -1145,7 +1131,7 @@ class _ThinkingDots extends StatefulWidget {
 class _ThinkingDotsState extends State<_ThinkingDots>
     with TickerProviderStateMixin {
   late final List<AnimationController> _ctrls;
-  late final List<Animation<double>>   _scales;
+  late final List<Animation<double>> _scales;
 
   @override
   void initState() {
@@ -1153,7 +1139,7 @@ class _ThinkingDotsState extends State<_ThinkingDots>
     _ctrls = List.generate(
         3,
             (i) => AnimationController(
-            vsync:    this,
+            vsync: this,
             duration: const Duration(milliseconds: 500)));
     _scales = _ctrls
         .map((c) => Tween<double>(begin: 0.4, end: 1.0).animate(
@@ -1190,9 +1176,10 @@ class _ThinkingDotsState extends State<_ThinkingDots>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Particle background (static, from chat_screen.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Particle background
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ParticleBackground extends StatelessWidget {
   final int count;
   const _ParticleBackground({required this.count});
@@ -1203,7 +1190,7 @@ class _ParticleBackground extends StatelessWidget {
       opacity: 0.3,
       child: CustomPaint(
         painter: _ChatParticlePainter(0.0, count),
-        size:    MediaQuery.of(context).size,
+        size: MediaQuery.of(context).size,
       ),
     );
   }
@@ -1211,13 +1198,13 @@ class _ParticleBackground extends StatelessWidget {
 
 class _ChatParticlePainter extends CustomPainter {
   final double progress;
-  final int    count;
+  final int count;
   _ChatParticlePainter(this.progress, this.count);
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = Colors.white10;
-    final rng   = math.Random(42); // fixed seed so dots don't jitter
+    final rng = math.Random(42);
     for (int i = 0; i < count; i++) {
       canvas.drawCircle(
         Offset(rng.nextDouble() * size.width,
@@ -1231,11 +1218,12 @@ class _ChatParticlePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter _) => false;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Hover icon button (from chat_screen.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Hover icon
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _AnimatedHoverIcon extends StatefulWidget {
-  final IconData     icon;
+  final IconData icon;
   final VoidCallback onTap;
   const _AnimatedHoverIcon({required this.icon, required this.onTap});
 
@@ -1250,7 +1238,7 @@ class _AnimatedHoverIconState extends State<_AnimatedHoverIcon> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: GestureDetector(
         onTap: widget.onTap,
@@ -1271,9 +1259,10 @@ class _AnimatedHoverIconState extends State<_AnimatedHoverIcon> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Hover dropdown button label (from chat_screen.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Hover dropdown
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _AnimatedHoverDropdownButton extends StatefulWidget {
   final String text;
   const _AnimatedHoverDropdownButton({required this.text});
@@ -1291,7 +1280,7 @@ class _AnimatedHoverDropdownButtonState
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -1308,12 +1297,11 @@ class _AnimatedHoverDropdownButtonState
             Text(widget.text,
                 style: GoogleFonts.outfit(
                     color: _hovered ? Colors.white : Colors.white70,
-                    fontSize:   13,
+                    fontSize: 13,
                     fontWeight: FontWeight.w500)),
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down,
-                color:
-                _hovered ? Colors.white : Colors.white54,
+                color: _hovered ? Colors.white : Colors.white54,
                 size: 16),
           ],
         ),
@@ -1322,9 +1310,10 @@ class _AnimatedHoverDropdownButtonState
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Send button (from chat_screen.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Send button
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _AnimatedHoverSendButton extends StatefulWidget {
   @override
   State<_AnimatedHoverSendButton> createState() =>
@@ -1339,7 +1328,7 @@ class _AnimatedHoverSendButtonState
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
-      onExit:  (_) => setState(() => _hovered = false),
+      onExit: (_) => setState(() => _hovered = false),
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -1355,12 +1344,13 @@ class _AnimatedHoverSendButtonState
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Animated press button (from main.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Animated button (Sign In / Sign Up)
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _AnimatedButton extends StatefulWidget {
-  final String       label;
-  final bool         filled;
+  final String label;
+  final bool filled;
   final VoidCallback onTap;
   const _AnimatedButton(
       {required this.label,
@@ -1374,7 +1364,7 @@ class _AnimatedButton extends StatefulWidget {
 class _AnimatedButtonState extends State<_AnimatedButton>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  late final Animation<double>   _scale;
+  late final Animation<double> _scale;
 
   @override
   void initState() {
@@ -1409,14 +1399,14 @@ class _AnimatedButtonState extends State<_AnimatedButton>
           padding: const EdgeInsets.symmetric(
               vertical: 12, horizontal: 24),
           decoration: BoxDecoration(
-            color:        AppTheme.primaryRed,
+            color: AppTheme.primaryRed,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Text(widget.label,
               style: GoogleFonts.outfit(
-                  fontSize:   14,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color:      Colors.white)),
+                  color: Colors.white)),
         )
             : Container(
           padding: const EdgeInsets.symmetric(
@@ -1429,30 +1419,31 @@ class _AnimatedButtonState extends State<_AnimatedButton>
           ),
           child: Text(widget.label,
               style: GoogleFonts.outfit(
-                  fontSize:   14,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color:      AppTheme.textPrimary)),
+                  color: AppTheme.textPrimary)),
         ),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  AnimatedDropdown  (from chat_screen.dart — full implementation kept)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  AnimatedDropdown (kept identical to chat_screen.dart)
+// ═══════════════════════════════════════════════════════════════════════════
+
 class AnimatedDropdown extends StatefulWidget {
-  final Widget                    child;
+  final Widget child;
   final List<DropdownMenuItemData> items;
   final double dropdownWidth;
-  final Color  backgroundColor;
+  final Color backgroundColor;
 
   const AnimatedDropdown({
     Key? key,
     required this.child,
     required this.items,
-    this.dropdownWidth    = 300,
-    this.backgroundColor  = const Color(0xFF2D2D2D),
+    this.dropdownWidth = 300,
+    this.backgroundColor = const Color(0xFF2D2D2D),
   }) : super(key: key);
 
   @override
@@ -1462,10 +1453,10 @@ class AnimatedDropdown extends StatefulWidget {
 class _AnimatedDropdownState extends State<AnimatedDropdown>
     with SingleTickerProviderStateMixin {
   final LayerLink _layerLink = LayerLink();
-  OverlayEntry?   _overlayEntry;
-  bool            _isOpen = false;
+  OverlayEntry? _overlayEntry;
+  bool _isOpen = false;
   late final AnimationController _animCtrl;
-  late final Animation<double>   _expandAnim;
+  late final Animation<double> _expandAnim;
 
   @override
   void initState() {
@@ -1488,7 +1479,7 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
 
   void _show() {
     if (_overlayEntry != null) return;
-    final box  = context.findRenderObject() as RenderBox;
+    final box = context.findRenderObject() as RenderBox;
     final size = box.size;
     _overlayEntry = OverlayEntry(
       builder: (_) => Stack(
@@ -1496,31 +1487,31 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.translucent,
-              onTap:    _close,
-              child:    Container(color: Colors.transparent),
+              onTap: _close,
+              child: Container(color: Colors.transparent),
             ),
           ),
           CompositedTransformFollower(
-            link:              _layerLink,
-            showWhenUnlinked:  false,
-            offset:            Offset(0, size.height + 8),
+            link: _layerLink,
+            showWhenUnlinked: false,
+            offset: Offset(0, size.height + 8),
             child: Material(
               color: Colors.transparent,
               child: SizeTransition(
-                sizeFactor:    _expandAnim,
+                sizeFactor: _expandAnim,
                 axisAlignment: -1.0,
                 child: Container(
                   width: widget.dropdownWidth,
                   decoration: BoxDecoration(
-                    color:        widget.backgroundColor,
+                    color: widget.backgroundColor,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                         color: Colors.white.withOpacity(0.1)),
                     boxShadow: [
                       BoxShadow(
-                          color:      Colors.black.withOpacity(0.3),
+                          color: Colors.black.withOpacity(0.3),
                           blurRadius: 10,
-                          offset:     const Offset(0, 5))
+                          offset: const Offset(0, 5))
                     ],
                   ),
                   child: ClipRRect(
@@ -1535,9 +1526,9 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
                           children: widget.items.map((item) {
                             if (item.isDivider) {
                               return Divider(
-                                height:    1,
-                                color:     Colors.white.withOpacity(0.1),
-                                indent:    16,
+                                height: 1,
+                                color: Colors.white.withOpacity(0.1),
+                                indent: 16,
                                 endIndent: 16,
                               );
                             }
@@ -1573,37 +1564,37 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   void _removeOverlay() {
     _overlayEntry?.remove();
     _overlayEntry = null;
-    _isOpen       = false;
+    _isOpen = false;
   }
 
   @override
   Widget build(BuildContext context) {
     return CompositedTransformTarget(
-      link:  _layerLink,
+      link: _layerLink,
       child: GestureDetector(onTap: _toggle, child: widget.child),
     );
   }
 }
 
 class DropdownMenuItemData {
-  final String    title;
-  final String?   subtitle;
-  final Widget?   trailing;
-  final Widget?   titleTrailing;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final Widget? titleTrailing;
   final VoidCallback? onTap;
-  final bool      closeOnTap;
-  final bool      isDivider;
-  final bool      isDisabled;
+  final bool closeOnTap;
+  final bool isDivider;
+  final bool isDisabled;
 
   DropdownMenuItemData({
-    this.title         = '',
+    this.title = '',
     this.subtitle,
     this.trailing,
     this.titleTrailing,
     this.onTap,
-    this.closeOnTap    = true,
-    this.isDivider     = false,
-    this.isDisabled    = false,
+    this.closeOnTap = true,
+    this.isDivider = false,
+    this.isDisabled = false,
   });
 
   factory DropdownMenuItemData.divider() =>
@@ -1612,7 +1603,7 @@ class DropdownMenuItemData {
 
 class _DropdownItemWidget extends StatefulWidget {
   final DropdownMenuItemData item;
-  final VoidCallback         onItemTapped;
+  final VoidCallback onItemTapped;
 
   const _DropdownItemWidget(
       {Key? key,
@@ -1662,7 +1653,7 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
                               color: widget.item.isDisabled
                                   ? Colors.white.withOpacity(0.3)
                                   : Colors.white,
-                              fontSize:   15,
+                              fontSize: 15,
                               fontWeight: FontWeight.w600)),
                       if (widget.item.titleTrailing != null) ...[
                         const SizedBox(width: 8),
@@ -1693,9 +1684,10 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Tools bottom sheet (unchanged from main.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Tools sheet
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _ToolsSheet extends StatefulWidget {
   final VoidCallback onWeather;
   final VoidCallback onQR;
@@ -1718,15 +1710,15 @@ class _ToolsSheet extends StatefulWidget {
 class _ToolsSheetState extends State<_ToolsSheet>
     with TickerProviderStateMixin {
   late final List<AnimationController> _itemCtrls;
-  late final List<Animation<double>>   _itemOpacities;
-  late final List<Animation<Offset>>   _itemSlides;
+  late final List<Animation<double>> _itemOpacities;
+  late final List<Animation<Offset>> _itemSlides;
 
   static const _items = [
-    (Icons.wb_sunny_rounded,      'Check Weather',     'Get real-time weather & forecast'),
-    (Icons.qr_code_scanner_rounded,'Scan QR Code',     'Analyze data from QR codes'),
-    (Icons.image_search_rounded,  'Search by Image',   'Ask about a photo from gallery'),
-    (Icons.analytics_rounded,     'Analyze Chart',     'Perform technical chart analysis'),
-    (Icons.brush_rounded,         'Generate AI Image', 'Create unique images using free AI'),
+    (Icons.wb_sunny_rounded, 'Check Weather', 'Get real-time weather & forecast'),
+    (Icons.qr_code_scanner_rounded, 'Scan QR Code', 'Analyze data from QR codes'),
+    (Icons.image_search_rounded, 'Search by Image', 'Ask about a photo from gallery'),
+    (Icons.analytics_rounded, 'Analyze Chart', 'Perform technical chart analysis'),
+    (Icons.brush_rounded, 'Generate AI Image', 'Create unique images using free AI'),
   ];
 
   @override
@@ -1735,7 +1727,7 @@ class _ToolsSheetState extends State<_ToolsSheet>
     _itemCtrls = List.generate(
       _items.length,
           (i) => AnimationController(
-          vsync:    this,
+          vsync: this,
           duration: const Duration(milliseconds: 350)),
     );
     _itemOpacities = _itemCtrls
@@ -1744,7 +1736,7 @@ class _ToolsSheetState extends State<_ToolsSheet>
     _itemSlides = _itemCtrls
         .map((c) => Tween<Offset>(
       begin: const Offset(0, 0.3),
-      end:   Offset.zero,
+      end: Offset.zero,
     ).animate(
         CurvedAnimation(parent: c, curve: Curves.easeOutCubic)))
         .toList();
@@ -1776,15 +1768,15 @@ class _ToolsSheetState extends State<_ToolsSheet>
     return Container(
       height: 360,
       decoration: BoxDecoration(
-        color:        AppTheme.surfaceDark,
+        color: AppTheme.surfaceDark,
         borderRadius: const BorderRadius.vertical(
             top: Radius.circular(32)),
         border: Border.all(
             color: Colors.white.withOpacity(0.08)),
         boxShadow: [
           BoxShadow(
-              color:       Colors.black.withOpacity(0.5),
-              blurRadius:  40,
+              color: Colors.black.withOpacity(0.5),
+              blurRadius: 40,
               spreadRadius: 10),
         ],
       ),
@@ -1794,15 +1786,15 @@ class _ToolsSheetState extends State<_ToolsSheet>
           Container(
             width: 48, height: 5,
             decoration: BoxDecoration(
-                color:        Colors.white24,
+                color: Colors.white24,
                 borderRadius: BorderRadius.circular(10)),
           ),
           const SizedBox(height: 20),
           Text('Tools & Actions',
               style: GoogleFonts.outfit(
-                  fontSize:   18,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color:      AppTheme.textPrimary)),
+                  color: AppTheme.textPrimary)),
           const SizedBox(height: 12),
           ...List.generate(_items.length, (i) {
             final (icon, title, subtitle) = _items[i];
@@ -1814,7 +1806,7 @@ class _ToolsSheetState extends State<_ToolsSheet>
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color:        AppTheme.primaryRed.withOpacity(0.1),
+                      color: AppTheme.primaryRed.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(icon,
@@ -1822,11 +1814,11 @@ class _ToolsSheetState extends State<_ToolsSheet>
                   ),
                   title: Text(title,
                       style: GoogleFonts.outfit(
-                          color:      AppTheme.textPrimary,
+                          color: AppTheme.textPrimary,
                           fontWeight: FontWeight.w600)),
                   subtitle: Text(subtitle,
                       style: GoogleFonts.outfit(
-                          color:    AppTheme.textSecondary,
+                          color: AppTheme.textSecondary,
                           fontSize: 12)),
                   onTap: () => _onTap(i),
                 ),
@@ -1839,9 +1831,10 @@ class _ToolsSheetState extends State<_ToolsSheet>
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Smooth page route helper (unchanged from main.dart)
-// ─────────────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════
+//  Smooth page route
+// ═══════════════════════════════════════════════════════════════════════════
+
 PageRouteBuilder _smoothRoute(Widget page) {
   return PageRouteBuilder(
     transitionDuration: const Duration(milliseconds: 450),
@@ -1852,7 +1845,7 @@ PageRouteBuilder _smoothRoute(Widget page) {
       child: SlideTransition(
         position: Tween<Offset>(
           begin: const Offset(0, 0.05),
-          end:   Offset.zero,
+          end: Offset.zero,
         ).animate(CurvedAnimation(
             parent: animation, curve: Curves.easeOutCubic)),
         child: child,
