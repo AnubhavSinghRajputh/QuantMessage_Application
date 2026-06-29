@@ -1,17 +1,22 @@
 // lib/main.dart
+//
+// QuantMessage.Ai — Multi-Agent AI Messaging Hub
+// Now with Supabase auth + .env-based credentials
+//
 
 import 'dart:async';
-import 'dart:ui';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';  // ← ADDED
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'services/quant_space_api.dart';
 import 'core/app_theme.dart';
@@ -23,21 +28,30 @@ import 'screens/sidebar_panel/left_sidebar.dart';
 import 'screens/animations/animation_effects/infinity_animation.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  App entry point — async + Supabase.initialize()
+//  App entry point — loads .env, initializes Supabase, runs app
 // ═══════════════════════════════════════════════════════════════════════════
 
 Future<void> main() async {
-  // ← 1. Required: bind Flutter to native engine
+  // 1. Required: bind Flutter to native engine (must be FIRST)
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ← 2. CRITICAL: Initialize Supabase BEFORE runApp()
+  // 2. Load .env file (contains SUPABASE_URL, SUPABASE_ANON_KEY, etc.)
+  await dotenv.load(fileName: '.env');
+
+  // 3. DEBUG: verify env loaded (remove these print lines after testing)
+  debugPrint('=== ENV LOADED ===');
+  debugPrint('URL: ${dotenv.env['SUPABASE_URL']}');
+  debugPrint('KEY: ${dotenv.env['SUPABASE_ANON_KEY']?.substring(0, 30)}...');
+  debugPrint('==================');
+
+  // 4. Initialize Supabase using values from .env
   await Supabase.initialize(
-    url: 'https://your-project.supabase.co',   // ← REPLACE with your URL
-    anonKey: 'your-anon-key-here',              // ← REPLACE with your anon key
-    debug: true,                                // ← set false in production
+    url: dotenv.env['SUPABASE_URL']!,
+    anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
+    debug: true, // set false in production
   );
 
-  // ← 3. Now safe to start the app
+  // 5. Now safe to start the app
   runApp(const ProviderScope(child: QuantSpaceApp()));
 }
 
@@ -53,8 +67,7 @@ class QuantSpaceApp extends StatelessWidget {
         brightness: Brightness.dark,
         primaryColor: AppTheme.primaryRed,
         scaffoldBackgroundColor: AppTheme.backgroundBlack,
-        textTheme:
-        GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
+        textTheme: GoogleFonts.outfitTextTheme(ThemeData.dark().textTheme),
         colorScheme: ColorScheme.fromSeed(
           seedColor: AppTheme.primaryRed,
           brightness: Brightness.dark,
@@ -213,8 +226,7 @@ class _HomeScreenState extends State<HomeScreen>
   void _pickImageAndSearch() async {
     final XFile? img = await _picker.pickImage(source: ImageSource.gallery);
     if (img != null) {
-      _controller.text =
-      'Search the web for details about this image...';
+      _controller.text = 'Search the web for details about this image...';
       _handleSend();
     }
   }
@@ -308,8 +320,7 @@ class _HomeScreenState extends State<HomeScreen>
           ));
         });
       } else {
-        final response =
-        await _api.chat(text, model: _selectedModelId);
+        final response = await _api.chat(text, model: _selectedModelId);
         setState(() {
           _messages.add(ChatMessage(
             text: response['content'],
@@ -620,8 +631,7 @@ class _HomeScreenState extends State<HomeScreen>
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Center(
-          child: Text(icon, style: const TextStyle(fontSize: 14))),
+      child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
     );
   }
 
@@ -720,10 +730,10 @@ class _HomeScreenState extends State<HomeScreen>
                         child: _isTyping
                             ? const Padding(
                           key: ValueKey('loading'),
-                          padding: EdgeInsets.symmetric(
-                              horizontal: 12),
+                          padding: EdgeInsets.symmetric(horizontal: 12),
                           child: SizedBox(
-                            width: 22, height: 22,
+                            width: 22,
+                            height: 22,
                             child: CircularProgressIndicator(
                               strokeWidth: 2.5,
                               color: AppTheme.primaryRed,
@@ -826,8 +836,7 @@ class _ModelChipState extends State<_ModelChip> {
             ),
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down,
-                size: 15,
-                color: Colors.white.withOpacity(0.55)),
+                size: 15, color: Colors.white.withOpacity(0.55)),
           ],
         ),
       ),
@@ -864,15 +873,12 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 380));
-    _opacity =
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+        vsync: this, duration: const Duration(milliseconds: 380));
+    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
     _slide = Tween<Offset>(
       begin: Offset(widget.message.isUser ? 0.04 : -0.04, 0.06),
       end: Offset.zero,
-    ).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.forward();
   }
 
@@ -891,15 +897,14 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
         position: _slide,
         child: Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(
-              vertical: 20, horizontal: 20),
+          padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
           decoration: BoxDecoration(
             color: msg.isUser
                 ? Colors.transparent
                 : Colors.white.withOpacity(0.012),
             border: Border(
-                bottom: BorderSide(
-                    color: Colors.white.withOpacity(0.03))),
+                bottom:
+                BorderSide(color: Colors.white.withOpacity(0.03))),
           ),
           child: Center(
             child: Container(
@@ -911,9 +916,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                     msg.isUser
                         ? '👤'
                         : widget.getModelIcon(msg.modelName),
-                    msg.isUser
-                        ? Colors.blueGrey
-                        : AppTheme.primaryRed,
+                    msg.isUser ? Colors.blueGrey : AppTheme.primaryRed,
                   ),
                   const SizedBox(width: 18),
                   Expanded(
@@ -921,9 +924,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          msg.isUser
-                              ? 'YOU'
-                              : msg.modelName.toUpperCase(),
+                          msg.isUser ? 'YOU' : msg.modelName.toUpperCase(),
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.w900,
                             fontSize: 11,
@@ -945,15 +946,13 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold),
                             code: GoogleFonts.outfit(
-                                backgroundColor:
-                                const Color(0xFF1E1E1E),
+                                backgroundColor: const Color(0xFF1E1E1E),
                                 color: Colors.orangeAccent,
                                 fontSize: 14),
                             codeblockDecoration: BoxDecoration(
                               color: const Color(0xFF1E1E1E),
                               borderRadius: BorderRadius.circular(12),
-                              border:
-                              Border.all(color: Colors.white10),
+                              border: Border.all(color: Colors.white10),
                             ),
                             blockquote: GoogleFonts.outfit(
                                 color: Colors.white60,
@@ -961,8 +960,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                             blockquoteDecoration: const BoxDecoration(
                               border: Border(
                                 left: BorderSide(
-                                    color: AppTheme.primaryRed,
-                                    width: 4),
+                                    color: AppTheme.primaryRed, width: 4),
                               ),
                             ),
                             img: const TextStyle(fontSize: 0),
@@ -990,8 +988,7 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Center(
-          child: Text(icon, style: const TextStyle(fontSize: 14))),
+      child: Center(child: Text(icon, style: const TextStyle(fontSize: 14))),
     );
   }
 
@@ -1008,7 +1005,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
               loadingBuilder: (_, child, progress) {
                 if (progress == null) return child;
                 return Container(
-                  height: 300, width: double.infinity,
+                  height: 300,
+                  width: double.infinity,
                   color: Colors.white.withOpacity(0.05),
                   child: const Center(
                     child: CircularProgressIndicator(
@@ -1017,7 +1015,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
                 );
               },
               errorBuilder: (_, __, ___) => Container(
-                height: 200, width: double.infinity,
+                height: 200,
+                width: double.infinity,
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(24),
@@ -1044,7 +1043,8 @@ class _AnimatedMessageRowState extends State<_AnimatedMessageRow>
               ),
             ),
             Positioned(
-              top: 12, right: 12,
+              top: 12,
+              right: 12,
               child: Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 8, vertical: 4),
@@ -1090,8 +1090,7 @@ class _SuggestionPillState extends State<_SuggestionPill> {
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:
-        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: _hovered
               ? Colors.white.withOpacity(0.1)
@@ -1165,7 +1164,8 @@ class _ThinkingDotsState extends State<_ThinkingDots>
         return ScaleTransition(
           scale: _scales[i],
           child: Container(
-            width: 8, height: 8,
+            width: 8,
+            height: 8,
             margin: const EdgeInsets.only(right: 6),
             decoration: const BoxDecoration(
                 color: Colors.white38, shape: BoxShape.circle),
@@ -1209,7 +1209,8 @@ class _ChatParticlePainter extends CustomPainter {
       canvas.drawCircle(
         Offset(rng.nextDouble() * size.width,
             rng.nextDouble() * size.height),
-        1.5, paint,
+        1.5,
+        paint,
       );
     }
   }
@@ -1251,8 +1252,7 @@ class _AnimatedHoverIconState extends State<_AnimatedHoverIcon> {
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8)),
           child: Icon(widget.icon,
-              color: _hovered ? Colors.white : Colors.white70,
-              size: 20),
+              color: _hovered ? Colors.white : Colors.white70, size: 20),
         ),
       ),
     );
@@ -1284,8 +1284,7 @@ class _AnimatedHoverDropdownButtonState
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding:
-        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
             color: _hovered
                 ? Colors.white.withOpacity(0.1)
@@ -1301,8 +1300,7 @@ class _AnimatedHoverDropdownButtonState
                     fontWeight: FontWeight.w500)),
             const SizedBox(width: 4),
             Icon(Icons.keyboard_arrow_down,
-                color: _hovered ? Colors.white : Colors.white54,
-                size: 16),
+                color: _hovered ? Colors.white : Colors.white54, size: 16),
           ],
         ),
       ),
@@ -1320,8 +1318,7 @@ class _AnimatedHoverSendButton extends StatefulWidget {
       _AnimatedHoverSendButtonState();
 }
 
-class _AnimatedHoverSendButtonState
-    extends State<_AnimatedHoverSendButton> {
+class _AnimatedHoverSendButtonState extends State<_AnimatedHoverSendButton> {
   bool _hovered = false;
 
   @override
@@ -1337,8 +1334,7 @@ class _AnimatedHoverSendButtonState
             color: _hovered ? Colors.white : Colors.white24,
             shape: BoxShape.circle),
         child: Icon(Icons.arrow_upward_rounded,
-            color: _hovered ? Colors.black : Colors.white,
-            size: 20),
+            color: _hovered ? Colors.black : Colors.white, size: 20),
       ),
     );
   }
@@ -1372,7 +1368,8 @@ class _AnimatedButtonState extends State<_AnimatedButton>
     _ctrl = AnimationController(
         vsync: this,
         duration: const Duration(milliseconds: 100),
-        lowerBound: 0.0, upperBound: 1.0);
+        lowerBound: 0.0,
+        upperBound: 1.0);
     _scale = Tween<double>(begin: 1.0, end: 0.94).animate(
         CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut));
   }
@@ -1396,8 +1393,8 @@ class _AnimatedButtonState extends State<_AnimatedButton>
         scale: _scale,
         child: widget.filled
             ? Container(
-          padding: const EdgeInsets.symmetric(
-              vertical: 12, horizontal: 24),
+          padding:
+          const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
           decoration: BoxDecoration(
             color: AppTheme.primaryRed,
             borderRadius: BorderRadius.circular(12),
@@ -1409,13 +1406,12 @@ class _AnimatedButtonState extends State<_AnimatedButton>
                   color: Colors.white)),
         )
             : Container(
-          padding: const EdgeInsets.symmetric(
-              vertical: 12, horizontal: 24),
+          padding:
+          const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-                color: Colors.white.withOpacity(0.15),
-                width: 1.5),
+                color: Colors.white.withOpacity(0.15), width: 1.5),
           ),
           child: Text(widget.label,
               style: GoogleFonts.outfit(
@@ -1462,10 +1458,9 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
   void initState() {
     super.initState();
     _animCtrl = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 300));
-    _expandAnim = CurvedAnimation(
-        parent: _animCtrl, curve: Curves.easeOutCubic);
+        vsync: this, duration: const Duration(milliseconds: 300));
+    _expandAnim =
+        CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic);
   }
 
   @override
@@ -1517,8 +1512,7 @@ class _AnimatedDropdownState extends State<AnimatedDropdown>
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: ConstrainedBox(
-                      constraints:
-                      const BoxConstraints(maxHeight: 300),
+                      constraints: const BoxConstraints(maxHeight: 300),
                       child: SingleChildScrollView(
                         physics: const BouncingScrollPhysics(),
                         child: Column(
@@ -1612,8 +1606,7 @@ class _DropdownItemWidget extends StatefulWidget {
       : super(key: key);
 
   @override
-  State<_DropdownItemWidget> createState() =>
-      _DropdownItemWidgetState();
+  State<_DropdownItemWidget> createState() => _DropdownItemWidgetState();
 }
 
 class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
@@ -1623,12 +1616,10 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
   Widget build(BuildContext context) {
     return MouseRegion(
       onEnter: (_) {
-        if (!widget.item.isDisabled)
-          setState(() => _hovered = true);
+        if (!widget.item.isDisabled) setState(() => _hovered = true);
       },
       onExit: (_) {
-        if (!widget.item.isDisabled)
-          setState(() => _hovered = false);
+        if (!widget.item.isDisabled) setState(() => _hovered = false);
       },
       cursor: widget.item.isDisabled
           ? SystemMouseCursors.basic
@@ -1639,8 +1630,8 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
           color: _hovered
               ? Colors.white.withOpacity(0.05)
               : Colors.transparent,
-          padding: const EdgeInsets.symmetric(
-              horizontal: 16, vertical: 12),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
               Expanded(
@@ -1657,7 +1648,7 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
                               fontWeight: FontWeight.w600)),
                       if (widget.item.titleTrailing != null) ...[
                         const SizedBox(width: 8),
-                        widget.item.titleTrailing!,
+                        widget.item.titleTrailing!
                       ],
                     ]),
                     if (widget.item.subtitle != null) ...[
@@ -1667,14 +1658,14 @@ class _DropdownItemWidgetState extends State<_DropdownItemWidget> {
                               color: widget.item.isDisabled
                                   ? Colors.white.withOpacity(0.3)
                                   : Colors.white.withOpacity(0.5),
-                              fontSize: 13)),
+                              fontSize: 13))
                     ],
                   ],
                 ),
               ),
               if (widget.item.trailing != null) ...[
                 const SizedBox(width: 12),
-                widget.item.trailing!,
+                widget.item.trailing!
               ],
             ],
           ),
@@ -1714,11 +1705,19 @@ class _ToolsSheetState extends State<_ToolsSheet>
   late final List<Animation<Offset>> _itemSlides;
 
   static const _items = [
-    (Icons.wb_sunny_rounded, 'Check Weather', 'Get real-time weather & forecast'),
-    (Icons.qr_code_scanner_rounded, 'Scan QR Code', 'Analyze data from QR codes'),
-    (Icons.image_search_rounded, 'Search by Image', 'Ask about a photo from gallery'),
-    (Icons.analytics_rounded, 'Analyze Chart', 'Perform technical chart analysis'),
-    (Icons.brush_rounded, 'Generate AI Image', 'Create unique images using free AI'),
+    (
+    Icons.wb_sunny_rounded,
+    'Check Weather',
+    'Get real-time weather & forecast'
+    ),
+    (Icons.qr_code_scanner_rounded, 'Scan QR Code',
+    'Analyze data from QR codes'),
+    (Icons.image_search_rounded, 'Search by Image',
+    'Ask about a photo from gallery'),
+    (Icons.analytics_rounded, 'Analyze Chart',
+    'Perform technical chart analysis'),
+    (Icons.brush_rounded, 'Generate AI Image',
+    'Create unique images using free AI'),
   ];
 
   @override
@@ -1727,8 +1726,7 @@ class _ToolsSheetState extends State<_ToolsSheet>
     _itemCtrls = List.generate(
       _items.length,
           (i) => AnimationController(
-          vsync: this,
-          duration: const Duration(milliseconds: 350)),
+          vsync: this, duration: const Duration(milliseconds: 350)),
     );
     _itemOpacities = _itemCtrls
         .map((c) => CurvedAnimation(parent: c, curve: Curves.easeOut))
@@ -1742,7 +1740,9 @@ class _ToolsSheetState extends State<_ToolsSheet>
         .toList();
     for (int i = 0; i < _itemCtrls.length; i++) {
       Future.delayed(Duration(milliseconds: 60 * i),
-              () { if (mounted) _itemCtrls[i].forward(); });
+              () {
+            if (mounted) _itemCtrls[i].forward();
+          });
     }
   }
 
@@ -1769,10 +1769,9 @@ class _ToolsSheetState extends State<_ToolsSheet>
       height: 360,
       decoration: BoxDecoration(
         color: AppTheme.surfaceDark,
-        borderRadius: const BorderRadius.vertical(
-            top: Radius.circular(32)),
-        border: Border.all(
-            color: Colors.white.withOpacity(0.08)),
+        borderRadius:
+        const BorderRadius.vertical(top: Radius.circular(32)),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
         boxShadow: [
           BoxShadow(
               color: Colors.black.withOpacity(0.5),
@@ -1784,7 +1783,8 @@ class _ToolsSheetState extends State<_ToolsSheet>
         children: [
           const SizedBox(height: 12),
           Container(
-            width: 48, height: 5,
+            width: 48,
+            height: 5,
             decoration: BoxDecoration(
                 color: Colors.white24,
                 borderRadius: BorderRadius.circular(10)),
@@ -1840,8 +1840,8 @@ PageRouteBuilder _smoothRoute(Widget page) {
     transitionDuration: const Duration(milliseconds: 450),
     pageBuilder: (_, __, ___) => page,
     transitionsBuilder: (_, animation, __, child) => FadeTransition(
-      opacity: CurvedAnimation(
-          parent: animation, curve: Curves.easeOut),
+      opacity:
+      CurvedAnimation(parent: animation, curve: Curves.easeOut),
       child: SlideTransition(
         position: Tween<Offset>(
           begin: const Offset(0, 0.05),

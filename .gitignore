@@ -1,4 +1,17 @@
-# Miscellaneous
+# ═══════════════════════════════════════════════════════════════════════════
+#  QuantMessage .gitignore
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── Environment files (NEVER commit secrets!) ─────────────────────────────
+.env
+.env.local
+.env.production
+.env.development
+.env.staging
+*.env
+!.env.example
+
+# ── Miscellaneous ──────────────────────────────────────────────────────────
 *.class
 *.log
 *.pyc
@@ -12,7 +25,7 @@
 .swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# ── IntelliJ related ──────────────────────────────────────────────────────
 *.iml
 *.ipr
 *.iws
@@ -23,7 +36,7 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
-# Flutter/Dart/Pub related
+# ── Flutter/Dart/Pub related ──────────────────────────────────────────────
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
@@ -33,13 +46,73 @@ migrate_working_dir/
 /build/
 /coverage/
 
-# Symbolication related
+# ── Symbolication related ──────────────────────────────────────────────────
 app.*.symbols
 
-# Obfuscation related
+# ── Obfuscation related ────────────────────────────────────────────────────
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# ── Android Studio will place build artifacts here ────────────────────────
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  QuantMessage additions
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── API keys & secrets backup files ────────────────────────────────────────
+secrets.json
+*_secret.json
+credentials.json
+api_keys.txt
+*.pem
+*.key
+
+# ── Supabase local dev artifacts ───────────────────────────────────────────
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# ── FastAPI / Python backend artifacts (if backend lives in same repo) ────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+.env.bak
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# ── Mobile build artifacts ────────────────────────────────────────────────
+*.apk
+*.aab
+*.ipa
+*.app
+*.exe
+*.dll
+*.so
+*.dylib
+*.log
+
+# ── OS files ──────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Editor backups ────────────────────────────────────────────────────────
+*~
+*.bak
+*.swp
+*.swo
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example

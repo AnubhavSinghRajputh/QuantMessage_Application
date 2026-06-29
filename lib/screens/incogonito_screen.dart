@@ -345,10 +345,10 @@ class _IncognitoScreenState extends State<IncognitoScreen>
             ),
             const SizedBox(width: 12),
             TypingText(
-              text: "[ Gone Incognito ]",
+              text: "< Gone Incognito >",
               style: GoogleFonts.tinos(
                 color: const Color(0xFFE8E8E8),
-                fontSize: 45,
+                fontSize: 55,
                 fontWeight: FontWeight.w900,
               ),
               typingSpeed: const Duration(milliseconds: 50),

@@ -13,6 +13,11 @@ dependencies:
   cupertino_icons: ^1.0.8
 
   # ═══════════════════════════════════════════════════════════════════════════
+  #  Environment variables
+  # ═══════════════════════════════════════════════════════════════════════════
+  flutter_dotenv: ^5.2.1           # ← NEW: Load .env file for Supabase keys
+
+  # ═══════════════════════════════════════════════════════════════════════════
   #  Networking & API
   # ═══════════════════════════════════════════════════════════════════════════
   dio: ^5.4.3+1
@@ -22,7 +27,7 @@ dependencies:
   # ═══════════════════════════════════════════════════════════════════════════
   #  Supabase & Auth
   # ═══════════════════════════════════════════════════════════════════════════
-  supabase_flutter: ^2.8.0           # Backend auth + storage
+  supabase_flutter: ^2.10.0          # ← CHANGED: Updated for new key format (sb_publishable_)
 
   # ═══════════════════════════════════════════════════════════════════════════
   #  State Management & Persistence
@@ -45,7 +50,7 @@ dependencies:
   cached_network_image: ^3.4.1       # ← NEW: image caching for thumbnails/PDFs
 
   # ═══════════════════════════════════════════════════════════════════════════
-  #  File / Image / PDF Handling  ← NEW SECTION
+  #  File / Image / PDF Handling
   # ═══════════════════════════════════════════════════════════════════════════
   image_picker: ^1.1.2               # Gallery + camera capture (bumped from 1.0.7)
   file_picker: ^8.1.4                # ← NEW: PDF & document picker
@@ -82,7 +87,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  flutter_lints: ^4.0.0              # ← bumped to match latest Flutter
+  flutter_lints: ^4.0.0
   build_runner: ^2.4.13
   hive_generator: ^2.0.1
 
@@ -90,7 +95,11 @@ flutter:
   uses-material-design: true
   generate: true
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  Assets bundled with the app
+  # ═══════════════════════════════════════════════════════════════════════════
+  assets:
+    - .env                            # ← NEW: required for Supabase keys
   # Uncomment when you add Lottie animations or custom images:
-  # assets:
-  #   - assets/animations/
-  #   - assets/images/
+  # - assets/animations/
+  # - assets/images/
